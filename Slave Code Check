@@ -1,0 +1,19 @@
+#include <Wire.h>
+
+int x = 0;
+
+void setup() {
+  Serial.begin(9600);  // Initialize serial communication
+  Wire.begin(9);       // Start the I2C Bus as Slave on address 9
+  Wire.onReceive(receiveEvent);  // Attach a function to trigger when something is received.
+}
+
+void receiveEvent(int bytes) {
+  x = Wire.read();    // read one character from the I2C
+}
+
+void loop() {
+  Serial.print("Received value: ");
+  Serial.println(x);
+  delay(100);  // Add a small delay to prevent flooding the serial monitor
+}
