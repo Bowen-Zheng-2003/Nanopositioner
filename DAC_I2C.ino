@@ -1,37 +1,29 @@
 #include <Wire.h>
 
 #define MCP4728_ADDR 0x60  // Default I2C address for MCP4728
-static int valueA = 0;
+
+static uint16_t valueA = 0;
 
 void setup() {
-  Wire.begin();
-  Wire.setClock(400000);  // Set I2C clock to 400kHz for faster communication
-  Serial.begin(115200);   // Initialize serial communication for debugging
+  Serial.begin(9600);
+  Wire.begin();  // Initialize I2C communication
+  Wire.setClock(400000);  // Set to 400kHz, which is the maximum for standard mode I2C
 }
 
 void loop() {
-  const int maxValue = 4000;
-  const int stepSizeA = 425;  // Smaller step size for channel A
+  // Basic DAC control
+  static const uint16_t maxValue = 4000;
+  static const uint16_t stepSizeA = 700;
 
-  // Update channel A more frequently
-  valueA = (valueA + stepSizeA) % (maxValue + 1);
-  writeToChannel(0, valueA);
-  Serial.print("Channel A: ");
-  Serial.println(valueA);
-  // delayMicroseconds(100);  // Small delay to control update rate
-}
-
-void writeToChannel(uint8_t channel, uint16_t value) {
+  // Increasing sawtooth waveform
+  // valueA = (valueA + stepSizeA) % (maxValue + 1);
+  // Decreasing sawtooth waveform
+  valueA = (valueA + maxValue - stepSizeA) % (maxValue + 1);
+  
+  // Inline the writeToChannel function
   Wire.beginTransmission(MCP4728_ADDR);
-  
-  // Command byte: 0 1 0 0 DAC1 DAC0 0 UDAC
-  // DAC1 DAC0: Channel select bits
-  // UDAC: Update DAC register bit (0 for this example)
-  Wire.write(0x40 | (channel << 1));
-  
-  // Data bytes
-  Wire.write((value >> 8) & 0x0F);  // Upper 4 bits of the 12-bit value
-  Wire.write(value & 0xFF);         // Lower 8 bits of the 12-bit value
-  
+  Wire.write(0x40);  // Channel 0
+  Wire.write((valueA >> 8) & 0x0F);
+  Wire.write(valueA & 0xFF);
   Wire.endTransmission();
 }
