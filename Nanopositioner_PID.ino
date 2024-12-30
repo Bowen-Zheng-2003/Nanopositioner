@@ -23,6 +23,10 @@ const int calibrateRange      = 2;
 unsigned long startTime       = 0;
 const unsigned long duration  = 2000; // 2 seconds in milliseconds
 bool calibrationDone          = false;
+const float micronsToCount    = 0.513;
+const float countsToMicrons    = 1.949;
+const int range               = 5; // units are in encoder counts
+bool messageDisplayed = false; // Global variable to track if message has been displayed
 
 // FOR SIGNAL GEN
 const int DELAY_ON            = 50; 
@@ -54,17 +58,19 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    char input = Serial.read();
-    switch (input) {
-      case '0':
-        signalOutput();
-        break;
-    }
-  }
+  // if (Serial.available() > 0) {
+  //   switch (Serial.read()) {
+  //     case '0':
+  //       signalOutput();
+  //       break;
+  //   }
+  // }
   if ((piezoPosition != 0) && (!calibrationDone)){
     setPosition();
+  } else{
+    userInput();
   }
+  
 }
 
 void mode() {
@@ -154,6 +160,52 @@ void setPosition() {
   oldPiezoPosition = piezoPosition;
   Serial.print("The calibrating encoder value is ");
   Serial.println(piezoPosition);
+}
+
+void userInput() {
+  if (!messageDisplayed) {
+    Serial.println("Type in the position (microns) you want to move to!");
+    messageDisplayed = true;
+  }  
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    float value = input.toFloat()*micronsToCount;
+    while (piezoPosition < value) {
+      if (!TOGGLE_STATE) {
+        reverse();
+        signalOutput();
+      }
+    }
+    // while (piezoPosition > input + range) {
+    //   reverse():
+    //     signalOutput();
+    // }
+    // while (!((piezoPosition < input - range) && (piezoPosition > input + range))) {
+    //   if (piezoPosition < input - range) {
+    //     reverse();
+    //     signalOutput();
+    //   } else if (piezoPosition > input + range) {
+    //     forward();
+    //     signalOutput();
+    //   } else {
+    //     if (TOGGLE_STATE){
+    //       signalOutput();
+    //     }
+    //     Serial.println("HELP!! userInput() function has gone wrong!");
+    //   }
+    // }
+    if (TOGGLE_STATE) {
+      signalOutput();
+    }
+    updatePiezoPosition();
+    Serial.print("You're at ");
+    Serial.print(piezoPosition);
+    Serial.print(" counts,");
+    Serial.print(" which is the same as: ");
+    Serial.print(piezoPosition*countsToMicrons);
+    Serial.println(" microns!");
+    delay(10000);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////
