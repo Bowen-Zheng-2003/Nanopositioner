@@ -1,49 +1,51 @@
-// FOR SIGNAL GENERATOR CONTROL
-const int SIGNAL    = 7; 
-const int CURSOR    = 8; 
-const int MODE      = 9; 
-const int ADD       = 10; 
-const int SUBTRACT  = 11;
-const int DELAY_ON  = 50; 
-const int DELAY_OFF = 100; 
-bool TOGGLE_STATE   = false; // false is if signal generator is off, true is on
+//** PIN ASSIGNMENT: **//
+// FOR POSITION
+const int PIN_NR_ENCODER_A    = 2;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int PIN_NR_ENCODER_B    = 3;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int CS_PIN              = 4;  // Enables encoder A and B to start when set to LOW 
+// FOR SIGNAL GENERATOR
+const int SIGNAL              = 7; 
+const int CURSOR              = 8; 
+const int MODE                = 9; 
+const int ADD                 = 10; 
+const int SUBTRACT            = 11;
 
-// FOR POSITION TRACKING
-#define CLK_PIN 13
-#define DO_PIN 12
-#define CS_PIN 2
-#define BUFFER_SIZE 10  // Buffer size for storing position values
-#define CHECK_SIZE 10 // Size for array containing new position values that changed
-bool magINC, magDEC, lin;
-bool turnOn              = 1;
-uint16_t positionBuffer[BUFFER_SIZE];  // Buffer to store position values
-uint16_t positionCheck[BUFFER_SIZE]; // Separate buffer to store position values that are scraps
-int j                    = 0;
-int ignore               = 0; // only start doing calculations once the list is full
-float mean               = 0;
-uint8_t bufferIndex      = 0;  // Index for the position buffer
-double averageDifference = 0.0;  // Average difference between consecutive position values
-// uint8_t resolution       = 2.0475;  // Room for error due to sensor sensitivity
-uint8_t resolution       = 5;
-uint16_t currentPosition;
-int calibratePosition    = 100;
-int oldCalibratePosition = 200;
-const int calibrateRange = 5;
-double finalPosition    = -100;
-unsigned long startTime = 0;
-const unsigned long duration = 2000; // 2 seconds in milliseconds
+//** VARIABLE: **//
+// FOR POSITION
+volatile int piezoPosition    = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int oldPiezoPosition = 200;
+volatile int encoderStatus    = 0; // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
+// The rightmost two bits of encoderStatus will store the encoder values from the current iteration (A and B).
+// The two bits to the left of those will store the encoder values from the previous iteration (A_old and B_old).
+
+// FOR CALIBRATION
+const int calibrateRange      = 2;
+unsigned long startTime       = 0;
+const unsigned long duration  = 2000; // 2 seconds in milliseconds
+bool calibrationDone          = false;
+
+// FOR SIGNAL GEN
+const int DELAY_ON            = 50; 
+const int DELAY_OFF           = 100; 
+bool TOGGLE_STATE             = false; // false is if signal generator is off, true is on
 
 void setup() {
-  pinMode(MODE, OUTPUT);
-  pinMode(CURSOR, OUTPUT);
-  pinMode(ADD, OUTPUT);
-  pinMode(SUBTRACT, OUTPUT);
-  pinMode(SIGNAL, OUTPUT);
+  // FOR POSITION
+  pinMode(PIN_NR_ENCODER_A,               INPUT);
+  pinMode(PIN_NR_ENCODER_B,               INPUT); 
+  pinMode(CS_PIN,                         OUTPUT);
+  digitalWrite(CS_PIN,                    LOW);
+  // Activate interrupt for encoder pins.
+  // If either of the two pins changes, the function 'updatePiezoPosition' is called:
+  attachInterrupt(0, updatePiezoPosition, CHANGE);  // Interrupt 0 is always attached to digital pin 2
+  attachInterrupt(1, updatePiezoPosition, CHANGE);  // Interrupt 1 is always attached to digital pin 3
 
-  pinMode(CLK_PIN, OUTPUT);
-  pinMode(DO_PIN, INPUT);
-  pinMode(CS_PIN, OUTPUT);
-  digitalWrite(CS_PIN, HIGH); // Deselect chip initially  
+  // FOR SIGNAL GEN
+  pinMode(MODE,                           OUTPUT);
+  pinMode(CURSOR,                         OUTPUT);
+  pinMode(ADD,                            OUTPUT);
+  pinMode(SUBTRACT,                       OUTPUT);
+  pinMode(SIGNAL,                         OUTPUT);
 
   Serial.begin(115200);
   setSignal();
@@ -60,9 +62,8 @@ void loop() {
         break;
     }
   }
-  if (finalPosition == -100){
-    int timeStart = millis(); 
-    setPosition(timeStart);
+  if ((piezoPosition != 0) && (!calibrationDone)){
+    setPosition();
   }
 }
 
@@ -119,7 +120,7 @@ void reverse() {
 }
 
 void setSignal() {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 3; i++) {
     mode();
   }
   decrement();
@@ -132,100 +133,54 @@ void setSignal() {
   delay(5000);
 }
 
-void setPosition(unsigned long timeStart) {
-  calibratePosition = calculatePosition();
-  
-  if ((calibratePosition >= oldCalibratePosition - calibrateRange) && 
-      (calibratePosition <= oldCalibratePosition + calibrateRange)) {
+void setPosition() {  
+  if ((piezoPosition >= oldPiezoPosition - calibrateRange) && 
+      (piezoPosition <= oldPiezoPosition + calibrateRange)) {
     if (startTime == 0) {
       startTime = millis();
     } else if (millis() - startTime >= duration) {
       signalOutput();
-      finalPosition = 0;
+      piezoPosition = 0;
+      calibrationDone = true;
       Serial.println("Finished calibrating position");
       Serial.print("The starting position is: ");
-      Serial.println(finalPosition);
+      Serial.println(piezoPosition);
       return;
     }
   } else {
     startTime = 0;
   }
   
-  oldCalibratePosition = calibratePosition;
+  oldPiezoPosition = piezoPosition;
   Serial.print("The calibrating encoder value is ");
-  Serial.println(calibratePosition);
+  Serial.println(piezoPosition);
 }
 
-uint16_t readAS5311() {
-  uint16_t data = 0;
-  int delayTime = 1;
-  
-  digitalWrite(CS_PIN, LOW); // Select chip
-  delayMicroseconds(1); // Wait for at least 500ns
-  
-  // Read 12 bits of data
-  for (int i = 0; i < 12; i++) {
-    digitalWrite(CLK_PIN, HIGH);
-    delayMicroseconds(delayTime);
-    data = (data << 1) | digitalRead(DO_PIN); // Shift in the next bit
-    digitalWrite(CLK_PIN, LOW);
-    delayMicroseconds(delayTime);
+//////////////////////////////////////////////////////////////////////
+// This is a function to update the encoder count in the Arduino.   //
+// It is called via an interrupt whenever the value on encoder      //
+// channel A or B changes.                                          //
+//////////////////////////////////////////////////////////////////////
+void updatePiezoPosition() {
+  // Bitwise shift left by one bit, to make room for a bit of new data:
+  encoderStatus <<= 1;   
+  // Use a compound bitwise OR operator (|=) to read the A channel of the encoder (pin 2)
+  // and put that value into the rightmost bit of encoderStatus:
+  encoderStatus |= digitalRead(PIN_NR_ENCODER_A);   
+  // Bitwise shift left by one bit, to make room for a bit of new data:
+  encoderStatus <<= 1;
+  // Use a compound bitwise OR operator  (|=) to read the B channel of the encoder (pin 3)
+  // and put that value into the rightmost bit of encoderStatus:
+  encoderStatus |= digitalRead(PIN_NR_ENCODER_B);
+  // encoderStatus is truncated to only contain the rightmost 4 bits by  using a 
+  // bitwise AND operator on mstatus and 15(=1111):
+  encoderStatus &= 15;
+  if (encoderStatus==2 || encoderStatus==4 || encoderStatus==11 || encoderStatus==13) {
+    // the encoder status matches a bit pattern that requires counting up by one
+    piezoPosition++;         // increase the encoder count by one
+  } else {
+    // the encoder status does not match a bit pattern that requires counting up by one.  
+    // Since this function is only called if something has changed, we have to count downwards
+    piezoPosition--;         // decrease the encoder count by one
   }
-  
-  digitalWrite(CS_PIN, HIGH); // Deselect chip
-  
-  return data;
-}
-
-float calculateMean(uint16_t* array, int size) {
-  uint32_t sum = 0;
-  for (int i = 0; i < size; i++) {
-    sum += array[i];
-  }
-  return (float)sum / size;
-}
-
-float calculatePosition() {
-  uint16_t position = readAS5311();
-  if (turnOn == 1){
-    currentPosition = positionBuffer[0];
-    turnOn = 0;
-  }
-  bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
-  if(ignore >= 10){
-    mean = calculateMean(positionBuffer, BUFFER_SIZE);
-    if(position > mean + resolution || position < mean - resolution){ // if it falls outside the acceptable range
-      positionCheck[j] = position;
-      j++;
-      if(j==CHECK_SIZE){ // if nanopositioner position changes, update the new position
-        float meanCheck = calculateMean(positionCheck, CHECK_SIZE);
-        if(positionCheck[0] < meanCheck + resolution || positionCheck[0] > meanCheck - resolution){
-          j = 0;
-          // Copy contents of positionCheck to positionBuffer
-          for(int k = 0; k < BUFFER_SIZE; k++) {
-              positionBuffer[k] = positionCheck[k];
-          }
-        }
-      }
-    }
-    else{
-      // Store the position in the buffer
-      positionBuffer[bufferIndex] = position;
-      j = 0;
-      for(int l = 0; l < BUFFER_SIZE; l++) {
-        positionCheck[l] = 0;
-      }
-    }
-  }
-  else{
-    // Store the position in the buffer
-    positionBuffer[bufferIndex] = position;
-  }
-  currentPosition = mean;
-  // Serial.print("Current position: ");
-  // Serial.println(currentPosition);
-
-  delay(5); // Adjust delay as necessary
-  ignore++;
-  return currentPosition;
 }
