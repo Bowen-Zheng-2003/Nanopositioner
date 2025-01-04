@@ -176,10 +176,12 @@ void userInput() {
         signalOutput();
       }
     }
-    // while (piezoPosition > input + range) {
-    //   reverse():
-    //     signalOutput();
-    // }
+    while (piezoPosition > value) {
+      if (!TOGGLE_STATE) {
+        forward();
+        signalOutput();
+      }
+    }
     // while (!((piezoPosition < input - range) && (piezoPosition > input + range))) {
     //   if (piezoPosition < input - range) {
     //     reverse();
