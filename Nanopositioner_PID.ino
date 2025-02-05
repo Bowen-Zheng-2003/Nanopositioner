@@ -24,7 +24,7 @@ unsigned long startTime       = 0;
 const unsigned long duration  = 2000; // 2 seconds in milliseconds
 bool calibrationDone          = false;
 const float micronsToCount    = 0.513;
-const float countsToMicrons    = 1.949;
+const float countsToMicrons   = 1.949;
 const int range               = 5; // units are in encoder counts
 bool messageDisplayed = false; // Global variable to track if message has been displayed
 
@@ -32,6 +32,8 @@ bool messageDisplayed = false; // Global variable to track if message has been d
 const int DELAY_ON            = 50; 
 const int DELAY_OFF           = 100; 
 bool TOGGLE_STATE             = false; // false is if signal generator is off, true is on
+int cursor_location           = 6; // Ranging from 1 to 6 - tells you where the cursor is on LCD
+long disp_freq                = 100000; // Default number that comes up when powering on device
 
 void setup() {
   // FOR POSITION
@@ -58,19 +60,11 @@ void setup() {
 }
 
 void loop() {
-  // if (Serial.available() > 0) {
-  //   switch (Serial.read()) {
-  //     case '0':
-  //       signalOutput();
-  //       break;
-  //   }
-  // }
   if ((piezoPosition != 0) && (!calibrationDone)){
     setPosition();
   } else{
     userInput();
   }
-  
 }
 
 void mode() {
@@ -111,6 +105,9 @@ void signalOutput() {
   digitalWrite(SIGNAL, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
   TOGGLE_STATE = !TOGGLE_STATE;
+  if (!TOGGLE_STATE){
+    cursor_location = 6;
+  }
   Serial.print("Turning signal ");
   Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
@@ -129,14 +126,10 @@ void setSignal() {
   for (int i = 0; i < 3; i++) {
     mode();
   }
-  decrement();
-  for (int i = 0; i < 2; i++) {
-    cursor();
-  }
-  increment();
+  changeSpeed(1000);
   Serial.println("Finished CALIBRATION");
-  Serial.println("Starting in 5 sec");
-  delay(5000);
+  Serial.println("Starting in 3 sec");
+  delay(3000);
 }
 
 void setPosition() {  
@@ -162,6 +155,85 @@ void setPosition() {
   Serial.println(piezoPosition);
 }
 
+void changeSpeed(long frequency) {
+  String old_freq = String(disp_freq);
+  String new_freq = String(frequency);
+  if (old_freq.length() > new_freq.length()){
+    for (int i = old_freq.length(); i > 0; i--) {
+      if (i <= new_freq.length()){ // once the old and new frequency have same digits
+        char old_freq_c = old_freq[old_freq.length()-i];
+        int old_freq_i = old_freq_c - '0';
+        char new_freq_c = new_freq[new_freq.length()-i];
+        int new_freq_i = new_freq_c - '0';
+        int diff = new_freq_i - old_freq_i;
+        if (diff > 0){
+          for (int i = 0; i < diff; i++){
+            increment();
+          }
+        }
+        else if (diff < 0){
+          diff = abs(diff);
+          for (int i = 0; i < diff; i++){
+            decrement();
+          }
+        }
+      }
+      else {
+        char old_freq_c = old_freq[old_freq.length()-i];
+        int old_freq_i = old_freq_c - '0';
+        if (old_freq_i > 0){
+          for (int i = 0; i < old_freq_i; i++){
+            decrement();
+          }
+        }
+      }
+      cursor();
+      cursor_location = cursor_location-1;
+      if (cursor_location == 0){ // help loop it back
+        cursor_location = 6;
+      }
+    }
+  }
+  else if (old_freq.length() == new_freq.length()){
+    int new_cursor_position = cursor_location - old_freq.length();
+    for (int i = 0; i < new_cursor_position; i++){
+      cursor();
+      cursor_location = cursor_location-1;
+      if (cursor_location == 0){ // help loop it back
+        cursor_location = 6;
+      }
+    }
+    for (int i = old_freq.length(); i > 0; i--) {
+      char old_freq_c = old_freq[old_freq.length()-i];
+      int old_freq_i = old_freq_c - '0';
+      char new_freq_c = new_freq[new_freq.length()-i];
+      int new_freq_i = new_freq_c - '0';
+      int diff = new_freq_i - old_freq_i;
+      if (diff > 0){
+        for (int i = 0; i < diff; i++){
+          increment();
+        }
+      }
+      else if (diff < 0){
+        diff = abs(diff);
+        for (int i = 0; i < diff; i++){
+          decrement();
+        }
+      }
+      cursor();
+      cursor_location = cursor_location-1;
+      if (cursor_location == 0){ // help loop it back
+        cursor_location = 6;
+      }
+    }
+  }
+  disp_freq = frequency;
+  // Serial.print("The position is now ");
+  // Serial.println(cursor_location);
+  // Serial.print("The new displayed frequency is ");
+  // Serial.println(disp_freq);
+}
+
 void userInput() {
   if (!messageDisplayed) {
     Serial.println("Type in the position (microns) you want to move to!");
@@ -171,39 +243,29 @@ void userInput() {
     String input = Serial.readStringUntil('\n');
     float value = input.toFloat()*micronsToCount;
     while (piezoPosition < value) {
+      Serial.print("You're at ");
+      Serial.print(piezoPosition*countsToMicrons);
+      Serial.println(" microns!");
       if (!TOGGLE_STATE) {
         reverse();
         signalOutput();
       }
     }
-    while (piezoPosition > value) {
-      if (!TOGGLE_STATE) {
-        forward();
-        signalOutput();
-      }
-    }
-    // while (!((piezoPosition < input - range) && (piezoPosition > input + range))) {
-    //   if (piezoPosition < input - range) {
-    //     reverse();
-    //     signalOutput();
-    //   } else if (piezoPosition > input + range) {
+    // while (piezoPosition > value) {
+    //   Serial.print("You're at ");
+    //   Serial.print(piezoPosition*countsToMicrons);
+    //   Serial.println(" microns!");
+    //   if (!TOGGLE_STATE) {
     //     forward();
     //     signalOutput();
-    //   } else {
-    //     if (TOGGLE_STATE){
-    //       signalOutput();
-    //     }
-    //     Serial.println("HELP!! userInput() function has gone wrong!");
     //   }
     // }
+
     if (TOGGLE_STATE) {
       signalOutput();
     }
     updatePiezoPosition();
     Serial.print("You're at ");
-    Serial.print(piezoPosition);
-    Serial.print(" counts,");
-    Serial.print(" which is the same as: ");
     Serial.print(piezoPosition*countsToMicrons);
     Serial.println(" microns!");
     delay(10000);
