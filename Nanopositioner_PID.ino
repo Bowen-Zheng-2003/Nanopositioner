@@ -63,9 +63,9 @@ long previousVelCompTime   = 0; // [microseconds] System clock value the last ti
 const int  MIN_VEL_COMP_COUNT = 2;     // [encoder counts] Minimal change in motor position that must happen between two velocity measurements
 const long MIN_VEL_COMP_TIME  = 10000; // [microseconds] Minimal time that must pass between two velocity measurements
 const int speed = 100;
-const float KP             = 5;  // [Volt / encoder counts] P-Gain
-const float KD             = 0.05;  // [Volt * seconds / encoder counts] D-Gain
-const float KI             = 0.5; // [Volt / (encoder counts * seconds)] I-Gain
+const float KP             = 2.5;  // [Volt / encoder counts] P-Gain
+const float KD             = 0.01;  // [Volt * seconds / encoder counts] D-Gain
+const float KI             = 0.005; // [Volt / (encoder counts * seconds)] I-Gain
 // Timing:
 const long  WAIT_TIME = 1000000; // [microseconds] Time waiting at each location
 unsigned long startWaitTime; // [microseconds] System clock value at the moment the WAIT state started
@@ -189,6 +189,12 @@ void loop() {
   }
   else if (desiredVoltage <= -900){
     desiredVoltage = -900;
+  }
+  else if ((desiredVoltage >= 0) && (desiredVoltage <= 10)){
+    desiredVoltage = 10;
+  }
+  else if ((desiredVoltage <= 0) && (desiredVoltage >= -10)){
+    desiredVoltage = -10;
   }
 
   if ((desiredVoltage >= 0) && (state==MOVE)){
