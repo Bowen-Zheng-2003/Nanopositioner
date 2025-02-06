@@ -10,6 +10,18 @@ const int MODE                = 9;
 const int ADD                 = 10; 
 const int SUBTRACT            = 11;
 
+//** State Machine: **//
+// CONSTANTS: 
+// Definition of states in the state machine
+const int CALIBRATE     = 1;
+const int MOVE          = 2;
+const int WAIT          = 3;
+// VARIABLES:
+// Global variable that keeps track of the state:
+// Start the state machine in calibration state:
+int  state = CALIBRATE;
+int old_state = CALIBRATE;
+
 //** VARIABLE: **//
 // FOR POSITION
 volatile int piezoPosition    = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
@@ -34,6 +46,31 @@ const int DELAY_OFF           = 100;
 bool TOGGLE_STATE             = false; // false is if signal generator is off, true is on
 int cursor_location           = 6; // Ranging from 1 to 6 - tells you where the cursor is on LCD
 long disp_freq                = 100000; // Default number that comes up when powering on device
+long new_frequency            = 0;
+
+// FOR PID CONTROL
+unsigned long executionDuration = 0;  // [microseconds] Time between this and the previous loop execution.  Variable used for integrals and derivatives
+unsigned long lastExecutionTime = 0;  // [microseconds] System clock value at the moment the loop was started the last time
+int  targetPosition  = 0;   // [encoder counts] desired motor position
+float positionError  = 0;   // [encoder counts] Position error
+float integralError  = 0;   // [encoder counts * seconds] Integrated position error
+float velocityError  = 0;   // [encoder counts / seconds] Velocity error
+float desiredVoltage = 0;   // [Volt] Desired motor voltage
+volatile int motorPosition = 0; // [encoder counts] Current motor position (Declared 'volatile', since it is updated in a function called by interrupts)
+float piezoVelocity        = 0; // [encoder counts / seconds] Current motor velocity 
+int previousMotorPosition  = 0; // [encoder counts] Motor position the last time a velocity was computed 
+long previousVelCompTime   = 0; // [microseconds] System clock value the last time a velocity was computed 
+const int  MIN_VEL_COMP_COUNT = 2;     // [encoder counts] Minimal change in motor position that must happen between two velocity measurements
+const long MIN_VEL_COMP_TIME  = 10000; // [microseconds] Minimal time that must pass between two velocity measurements
+const int speed = 100;
+const float KP             = 5;  // [Volt / encoder counts] P-Gain
+const float KD             = 0.05;  // [Volt * seconds / encoder counts] D-Gain
+const float KI             = 0.5; // [Volt / (encoder counts * seconds)] I-Gain
+// Timing:
+const long  WAIT_TIME = 1000000; // [microseconds] Time waiting at each location
+unsigned long startWaitTime; // [microseconds] System clock value at the moment the WAIT state started
+const int TARGET_BAND = 5;                      // [encoder counts] "Close enough" range when moving towards a target.
+bool direction = false; // false is reverse, true is forward
 
 void setup() {
   // FOR POSITION
@@ -54,17 +91,127 @@ void setup() {
   pinMode(SIGNAL,                         OUTPUT);
 
   Serial.begin(115200);
-  setSignal();
-  Serial.println("Type '0' to change output");
-  signalOutput(); // turn it on
 }
 
 void loop() {
-  if ((piezoPosition != 0) && (!calibrationDone)){
-    setPosition();
-  } else{
-    userInput();
+  //******************************************************************************//
+  // The state machine:
+  switch (state) {
+    case CALIBRATE:
+      setSignal();
+      signalOutput(); // turn it on
+      setPosition();
+
+      //Transition into WAIT state
+      //Record which state you came from
+      old_state = CALIBRATE;
+      state = WAIT;
+      startWaitTime = micros();
+      break;
+
+    case MOVE:
+      if (piezoPosition>=targetPosition-TARGET_BAND && piezoPosition<=targetPosition+TARGET_BAND) {
+        Serial.println("YOU FUCKING MADE IT !!!");
+        if (TOGGLE_STATE){ // make sure the signal generator is off!
+          signalOutput();
+        }
+        // We reached the position  
+        // Start waiting timer:
+        startWaitTime = micros();
+        //Tranistion into WAIT state
+        //Record which state you came from
+        old_state = MOVE;
+        state = WAIT;
+      } 
+      // Otherwise we continue moving towards the position
+      break;
+    
+    case WAIT:
+      if (micros()-startWaitTime>WAIT_TIME){
+
+        if (old_state == CALIBRATE){
+          Serial.println("Waiting for USER INPUT (from CALIBRATE)");
+          state = MOVE;
+          targetPosition = userInput();
+          Serial.println("State transition from CALIBRATE to MOVE");
+        }
+
+        if (old_state == MOVE){
+          Serial.println("Waiting for USER INPUT (from MOVE)");
+          state = MOVE;
+          targetPosition = userInput();
+          Serial.println("State transition from MOVE to MOVE");
+        }
+      }
+      break;
+
+    default: 
+      Serial.println("State machine reached a state that it cannot handle.  ABORT!!!!");
+      Serial.print("Found the following unknown state: ");
+      Serial.println(state);
+      while (1); // infinite loop to halt the program
+    break;
+
   }
+  executionDuration = micros() - lastExecutionTime;
+  lastExecutionTime = micros();
+
+  // Speed Computation:
+  if ((abs(piezoPosition - previousMotorPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME){
+    // If at least a minimum time interval has elapsed or
+    // the motor has travelled through at least a minimum angle ... 
+    // .. compute a new value for speed:
+    // (speed = delta angle [encoder counts] divided by delta time [seconds])
+    piezoVelocity = (double)(piezoPosition - previousMotorPosition) * 1000000 / 
+                            (micros() - previousVelCompTime);
+    // Remember this encoder count and time for the next iteration:
+    previousMotorPosition = piezoPosition;
+    previousVelCompTime   = micros();
+  }
+  // Serial.println(executionDuration);
+
+  //** PID control: **//  
+  // Compute the position error [encoder counts]
+  positionError = targetPosition - piezoPosition;
+  // Compute the integral of the position error  [encoder counts * seconds]
+  integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
+  // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
+  velocityError = 0 - piezoVelocity;
+  // This is the actual controller function that uses the error in 
+  // position and velocity and the integrated error and computes a
+  // desired voltage that should be sent to the motor:
+  desiredVoltage = KP * positionError +  
+                   KI * integralError +
+                   KD * velocityError;
+  
+  if (desiredVoltage >= 900){
+    desiredVoltage = 900;
+  }
+  else if (desiredVoltage <= -900){
+    desiredVoltage = -900;
+  }
+
+  if ((desiredVoltage >= 0) && (state==MOVE)){
+    if (TOGGLE_STATE){
+      signalOutput();
+    }
+    changeSpeed(int(desiredVoltage));
+    reverse();
+    signalOutput();
+  }
+  else if ((desiredVoltage < 0) && (state==MOVE)){
+    if (TOGGLE_STATE){
+      signalOutput();
+    }
+    changeSpeed(int(abs(desiredVoltage)));
+    forward();
+    signalOutput();
+  }
+  
+  Serial.print("CURRENT POSITION: ");
+  Serial.println(piezoPosition);
+  Serial.print("Target position: ");
+  Serial.println(targetPosition);
 }
 
 void mode() {
@@ -72,7 +219,7 @@ void mode() {
   delay(DELAY_ON);
   digitalWrite(MODE, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("Changing MODE");
+  // Serial.println("Changing MODE");
 }
 
 void cursor() {
@@ -80,7 +227,11 @@ void cursor() {
   delay(DELAY_ON);
   digitalWrite(CURSOR, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("Changing CURSOR");
+  // Serial.println("Changing CURSOR");
+  cursor_location = cursor_location-1;
+  if (cursor_location == 0){ // help loop it back
+    cursor_location = 6;
+  }
 }
 
 void increment() {
@@ -88,7 +239,7 @@ void increment() {
   delay(DELAY_ON);
   digitalWrite(ADD, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("INCREASING");
+  // Serial.println("INCREASING");
 }
 
 void decrement() {
@@ -96,7 +247,7 @@ void decrement() {
   delay(DELAY_ON);
   digitalWrite(SUBTRACT, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("DECREASING");
+  // Serial.println("DECREASING");
 }
 
 void signalOutput() {
@@ -108,57 +259,73 @@ void signalOutput() {
   if (!TOGGLE_STATE){
     cursor_location = 6;
   }
-  Serial.print("Turning signal ");
-  Serial.println(TOGGLE_STATE ? "ON" : "OFF");
+  // Serial.print("Turning signal ");
+  // Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
 
 void forward() {
-  for (int i = 0; i < 6; i++) {
-    mode();
+  if (!direction){ // if it's in reverse mode, do this
+    for (int i = 0; i < 6; i++) {
+      mode();
+    }
+    direction = true;
+  } else{
+    return;
   }
 }
 
 void reverse() {
-  mode();
+  if (direction){
+    mode();
+    direction = false;
+  } else{
+    return;
+  }
 }
 
 void setSignal() {
   for (int i = 0; i < 3; i++) {
     mode();
+    direction = true; // making it move forward now
   }
   changeSpeed(1000);
   Serial.println("Finished CALIBRATION");
-  Serial.println("Starting in 3 sec");
-  delay(3000);
+  Serial.println("Starting in 1 sec");
+  delay(1000);
 }
 
 void setPosition() {  
-  if ((piezoPosition >= oldPiezoPosition - calibrateRange) && 
-      (piezoPosition <= oldPiezoPosition + calibrateRange)) {
-    if (startTime == 0) {
-      startTime = millis();
-    } else if (millis() - startTime >= duration) {
-      signalOutput();
-      piezoPosition = 0;
-      calibrationDone = true;
-      Serial.println("Finished calibrating position");
-      Serial.print("The starting position is: ");
-      Serial.println(piezoPosition);
-      return;
+  while((piezoPosition != 0) && (!calibrationDone)){
+    if ((piezoPosition >= oldPiezoPosition - calibrateRange) && 
+        (piezoPosition <= oldPiezoPosition + calibrateRange)) {
+      if (startTime == 0) {
+        startTime = millis();
+      } else if (millis() - startTime >= duration) {
+        signalOutput();
+        piezoPosition = 0;
+        calibrationDone = true;
+        Serial.println("Finished calibrating position");
+        Serial.print("The starting position is: ");
+        Serial.println(piezoPosition);
+        break;
+      }
+    } else {
+      startTime = 0;
     }
-  } else {
-    startTime = 0;
+    oldPiezoPosition = piezoPosition;
+    Serial.print("The calibrating encoder value is ");
+    Serial.println(piezoPosition);
   }
-  
-  oldPiezoPosition = piezoPosition;
-  Serial.print("The calibrating encoder value is ");
-  Serial.println(piezoPosition);
 }
 
 void changeSpeed(long frequency) {
   String old_freq = String(disp_freq);
   String new_freq = String(frequency);
   if (old_freq.length() > new_freq.length()){
+    int new_cursor_position = cursor_location - old_freq.length();
+    for (int i = 0; i < new_cursor_position; i++){
+      cursor();
+    }
     for (int i = old_freq.length(); i > 0; i--) {
       if (i <= new_freq.length()){ // once the old and new frequency have same digits
         char old_freq_c = old_freq[old_freq.length()-i];
@@ -188,20 +355,12 @@ void changeSpeed(long frequency) {
         }
       }
       cursor();
-      cursor_location = cursor_location-1;
-      if (cursor_location == 0){ // help loop it back
-        cursor_location = 6;
-      }
     }
   }
   else if (old_freq.length() == new_freq.length()){
     int new_cursor_position = cursor_location - old_freq.length();
     for (int i = 0; i < new_cursor_position; i++){
       cursor();
-      cursor_location = cursor_location-1;
-      if (cursor_location == 0){ // help loop it back
-        cursor_location = 6;
-      }
     }
     for (int i = old_freq.length(); i > 0; i--) {
       char old_freq_c = old_freq[old_freq.length()-i];
@@ -221,10 +380,42 @@ void changeSpeed(long frequency) {
         }
       }
       cursor();
-      cursor_location = cursor_location-1;
-      if (cursor_location == 0){ // help loop it back
-        cursor_location = 6;
+    }
+  }
+  else if (new_freq.length() > old_freq.length()){
+    int new_cursor_position = cursor_location - new_freq.length();
+    for (int i = 0; i < new_cursor_position; i++){
+      cursor();
+    }
+    for (int i = new_freq.length(); i > 0; i--) {
+      if (i <= old_freq.length()){ // once the old and new frequency have same digits
+        char old_freq_c = old_freq[old_freq.length()-i];
+        int old_freq_i = old_freq_c - '0';
+        char new_freq_c = new_freq[new_freq.length()-i];
+        int new_freq_i = new_freq_c - '0';
+        int diff = new_freq_i - old_freq_i;
+        if (diff > 0){
+          for (int i = 0; i < diff; i++){
+            increment();
+          }
+        }
+        else if (diff < 0){
+          diff = abs(diff);
+          for (int i = 0; i < diff; i++){
+            decrement();
+          }
+        }
       }
+      else {
+        char new_freq_c = new_freq[new_freq.length()-i];
+        int new_freq_i = new_freq_c - '0';
+        if (new_freq_i > 0){
+          for (int i = 0; i < new_freq_i; i++){
+            increment();
+          }
+        }
+      }
+      cursor();
     }
   }
   disp_freq = frequency;
@@ -234,42 +425,20 @@ void changeSpeed(long frequency) {
   // Serial.println(disp_freq);
 }
 
-void userInput() {
+float userInput() {
+  float value = 0; 
   if (!messageDisplayed) {
     Serial.println("Type in the position (microns) you want to move to!");
     messageDisplayed = true;
   }  
+  while (Serial.available() == 0) {
+    // Wait for user input
+  }
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
-    float value = input.toFloat()*micronsToCount;
-    while (piezoPosition < value) {
-      Serial.print("You're at ");
-      Serial.print(piezoPosition*countsToMicrons);
-      Serial.println(" microns!");
-      if (!TOGGLE_STATE) {
-        reverse();
-        signalOutput();
-      }
-    }
-    // while (piezoPosition > value) {
-    //   Serial.print("You're at ");
-    //   Serial.print(piezoPosition*countsToMicrons);
-    //   Serial.println(" microns!");
-    //   if (!TOGGLE_STATE) {
-    //     forward();
-    //     signalOutput();
-    //   }
-    // }
-
-    if (TOGGLE_STATE) {
-      signalOutput();
-    }
-    updatePiezoPosition();
-    Serial.print("You're at ");
-    Serial.print(piezoPosition*countsToMicrons);
-    Serial.println(" microns!");
-    delay(10000);
+    value = input.toFloat()*micronsToCount;
   }
+  return value;
 }
 
 //////////////////////////////////////////////////////////////////////
