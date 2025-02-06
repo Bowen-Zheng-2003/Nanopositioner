@@ -1,76 +1,74 @@
 //** PIN ASSIGNMENT: **//
 // FOR POSITION
-const int PIN_NR_ENCODER_A    = 2;  // Never change these, since the interrupts are attached to pin 2 and 3
-const int PIN_NR_ENCODER_B    = 3;  // Never change these, since the interrupts are attached to pin 2 and 3
-const int CS_PIN              = 4;  // Enables encoder A and B to start when set to LOW 
+const int PIN_NR_ENCODER_A      = 2;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int PIN_NR_ENCODER_B      = 3;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int CS_PIN                = 4;  // Enables encoder A and B to start when set to LOW 
 // FOR SIGNAL GENERATOR
-const int SIGNAL              = 7; 
-const int CURSOR              = 8; 
-const int MODE                = 9; 
-const int ADD                 = 10; 
-const int SUBTRACT            = 11;
-
-//** State Machine: **//
-// CONSTANTS: 
-// Definition of states in the state machine
-const int CALIBRATE     = 1;
-const int MOVE          = 2;
-const int WAIT          = 3;
-// VARIABLES:
-// Global variable that keeps track of the state:
-// Start the state machine in calibration state:
-int  state = CALIBRATE;
-int old_state = CALIBRATE;
+const int SIGNAL                = 7; 
+const int CURSOR                = 8; 
+const int MODE                  = 9; 
+const int ADD                   = 10; 
+const int SUBTRACT              = 11;
 
 //** VARIABLE: **//
+// STATE MACHINE:
+// Definition of states in the state machine
+const int CALIBRATE             = 1;
+const int MOVE                  = 2;
+const int WAIT                  = 3;
+// Global variable that keeps track of the state:
+// Start the state machine in calibration state:
+int  state                      = CALIBRATE;
+int old_state                   = CALIBRATE;
+
 // FOR POSITION
-volatile int piezoPosition    = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
-volatile int oldPiezoPosition = 200;
-volatile int encoderStatus    = 0; // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int piezoPosition      = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int oldPiezoPosition   = 200;
+volatile int encoderStatus      = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
 // The rightmost two bits of encoderStatus will store the encoder values from the current iteration (A and B).
 // The two bits to the left of those will store the encoder values from the previous iteration (A_old and B_old).
 
 // FOR CALIBRATION
-const int calibrateRange      = 2;
-unsigned long startTime       = 0;
-const unsigned long duration  = 2000; // 2 seconds in milliseconds
-bool calibrationDone          = false;
-const float micronsToCount    = 0.513;
-const float countsToMicrons   = 1.949;
-const int range               = 5; // units are in encoder counts
-bool messageDisplayed = false; // Global variable to track if message has been displayed
+const int calibrateRange        = 2;
+unsigned long startTime         = 0;
+const unsigned long duration    = 2000;   // 2 seconds in milliseconds
+bool calibrationDone            = false;
+const float micronsToCount      = 0.513;
+const float countsToMicrons     = 1.949;
+const int range                 = 5;      // units are in encoder counts
+bool messageDisplayed           = false;  // Global variable to track if message has been displayed
 
 // FOR SIGNAL GEN
-const int DELAY_ON            = 50; 
-const int DELAY_OFF           = 100; 
-bool TOGGLE_STATE             = false; // false is if signal generator is off, true is on
-int cursor_location           = 6; // Ranging from 1 to 6 - tells you where the cursor is on LCD
-long disp_freq                = 100000; // Default number that comes up when powering on device
-long new_frequency            = 0;
+const int DELAY_ON              = 50; 
+const int DELAY_OFF             = 100; 
+bool TOGGLE_STATE               = false;  // false is if signal generator is off, true is on
+int cursor_location             = 6;      // Ranging from 1 to 6 - tells you where the cursor is on LCD
+long disp_freq                  = 100000; // Default number that comes up when powering on device
+long new_frequency              = 0;
+bool direction                  = false;  // false is reverse, true is forward
+bool defaultGains               = true;   // true is using default values, false is using new set
 
 // FOR PID CONTROL
-unsigned long executionDuration = 0;  // [microseconds] Time between this and the previous loop execution.  Variable used for integrals and derivatives
-unsigned long lastExecutionTime = 0;  // [microseconds] System clock value at the moment the loop was started the last time
-int  targetPosition  = 0;   // [encoder counts] desired motor position
-float positionError  = 0;   // [encoder counts] Position error
-float integralError  = 0;   // [encoder counts * seconds] Integrated position error
-float velocityError  = 0;   // [encoder counts / seconds] Velocity error
-float desiredVoltage = 0;   // [Volt] Desired motor voltage
-volatile int motorPosition = 0; // [encoder counts] Current motor position (Declared 'volatile', since it is updated in a function called by interrupts)
-float piezoVelocity        = 0; // [encoder counts / seconds] Current motor velocity 
-int previousMotorPosition  = 0; // [encoder counts] Motor position the last time a velocity was computed 
-long previousVelCompTime   = 0; // [microseconds] System clock value the last time a velocity was computed 
-const int  MIN_VEL_COMP_COUNT = 2;     // [encoder counts] Minimal change in motor position that must happen between two velocity measurements
-const long MIN_VEL_COMP_TIME  = 10000; // [microseconds] Minimal time that must pass between two velocity measurements
-const int speed = 100;
-const float KP             = 2.5;  // [Volt / encoder counts] P-Gain
-const float KD             = 0.01;  // [Volt * seconds / encoder counts] D-Gain
-const float KI             = 0.005; // [Volt / (encoder counts * seconds)] I-Gain
+unsigned long executionDuration = 0;      // [microseconds] Time between this and the previous loop execution.  Variable used for integrals and derivatives
+unsigned long lastExecutionTime = 0;      // [microseconds] System clock value at the moment the loop was started the last time
+int  targetPosition             = 0;      // [encoder counts] desired piezo position
+float positionError             = 0;      // [encoder counts] Position error
+float integralError             = 0;      // [encoder counts * seconds] Integrated position error
+float velocityError             = 0;      // [encoder counts / seconds] Velocity error
+float desiredFrequency          = 0;      // [Hz] Desired frequency for piezo actuator
+float piezoVelocity             = 0;      // [encoder counts / seconds] Current piezo velocity 
+int previousPiezoPosition       = 0;      // [encoder counts] Piezo position the last time a velocity was computed 
+long previousVelCompTime        = 0;      // [microseconds] System clock value the last time a velocity was computed 
+const int  MIN_VEL_COMP_COUNT   = 2;      // [encoder counts] Minimal change in piezo position that must happen between two velocity measurements
+const long MIN_VEL_COMP_TIME    = 10000;  // [microseconds] Minimal time that must pass between two velocity measurements
+float KP                        = 2.5;    // [Volt / encoder counts] P-Gain
+float KD                        = 0.005;  // [Volt * seconds / encoder counts] D-Gain
+float KI                        = 0.005;  // [Volt / (encoder counts * seconds)] I-Gain
+
 // Timing:
-const long  WAIT_TIME = 1000000; // [microseconds] Time waiting at each location
-unsigned long startWaitTime; // [microseconds] System clock value at the moment the WAIT state started
-const int TARGET_BAND = 5;                      // [encoder counts] "Close enough" range when moving towards a target.
-bool direction = false; // false is reverse, true is forward
+unsigned long startWaitTime;              // [microseconds] System clock value at the moment the WAIT state started
+const long  WAIT_TIME           = 1000000;// [microseconds] Time waiting at each location
+const int TARGET_BAND           = 5;      // [encoder counts] "Close enough" range when moving towards a target.
 
 void setup() {
   // FOR POSITION
@@ -94,8 +92,6 @@ void setup() {
 }
 
 void loop() {
-  //******************************************************************************//
-  // The state machine:
   switch (state) {
     case CALIBRATE:
       setSignal();
@@ -110,35 +106,35 @@ void loop() {
       break;
 
     case MOVE:
-      if (piezoPosition>=targetPosition-TARGET_BAND && piezoPosition<=targetPosition+TARGET_BAND) {
-        Serial.println("YOU FUCKING MADE IT !!!");
+      if (piezoPosition>=targetPosition-TARGET_BAND && piezoPosition<=targetPosition+TARGET_BAND) { // We reached the position
+        Serial.println("YOU REACHED THE POSITION");
         if (TOGGLE_STATE){ // make sure the signal generator is off!
           signalOutput();
-        }
-        // We reached the position  
+        }  
         // Start waiting timer:
         startWaitTime = micros();
-        //Tranistion into WAIT state
-        //Record which state you came from
-        old_state = MOVE;
-        state = WAIT;
+        old_state = MOVE; // Record which state you came from
+        state = WAIT; // Transition into WAIT state
       } 
       // Otherwise we continue moving towards the position
       break;
     
     case WAIT:
-      if (micros()-startWaitTime>WAIT_TIME){
-
+      if (micros()-startWaitTime>WAIT_TIME){ // enter WAIT after a certain amount of time
         if (old_state == CALIBRATE){
           Serial.println("Waiting for USER INPUT (from CALIBRATE)");
           state = MOVE;
           targetPosition = userInput();
           Serial.println("State transition from CALIBRATE to MOVE");
         }
-
         if (old_state == MOVE){
           Serial.println("Waiting for USER INPUT (from MOVE)");
           state = MOVE;
+          // RESET all the gain values
+          KP = 2.5;  
+          KD = 0.005;
+          KI = 0.005;
+          defaultGains = true;
           targetPosition = userInput();
           Serial.println("State transition from MOVE to MOVE");
         }
@@ -157,18 +153,15 @@ void loop() {
   lastExecutionTime = micros();
 
   // Speed Computation:
-  if ((abs(piezoPosition - previousMotorPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME){
+  if ((abs(piezoPosition - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME){
     // If at least a minimum time interval has elapsed or
-    // the motor has travelled through at least a minimum angle ... 
-    // .. compute a new value for speed:
-    // (speed = delta angle [encoder counts] divided by delta time [seconds])
-    piezoVelocity = (double)(piezoPosition - previousMotorPosition) * 1000000 / 
-                            (micros() - previousVelCompTime);
+    // a minimum distance has been traveled, compute a new value for speed:
+    // (speed = delta encoder counts divided by delta time [seconds])
+    piezoVelocity = (double)(piezoPosition - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
     // Remember this encoder count and time for the next iteration:
-    previousMotorPosition = piezoPosition;
+    previousPiezoPosition = piezoPosition;
     previousVelCompTime   = micros();
   }
-  // Serial.println(executionDuration);
 
   //** PID control: **//  
   // Compute the position error [encoder counts]
@@ -179,37 +172,48 @@ void loop() {
   velocityError = 0 - piezoVelocity;
   // This is the actual controller function that uses the error in 
   // position and velocity and the integrated error and computes a
-  // desired voltage that should be sent to the motor:
-  desiredVoltage = KP * positionError +  
+  // desired frequency that should be sent to the piezo:
+  desiredFrequency = KP * positionError +  
                    KI * integralError +
                    KD * velocityError;
-  
-  if (desiredVoltage >= 900){
-    desiredVoltage = 900;
-  }
-  else if (desiredVoltage <= -900){
-    desiredVoltage = -900;
-  }
-  else if ((desiredVoltage >= 0) && (desiredVoltage <= 10)){
-    desiredVoltage = 10;
-  }
-  else if ((desiredVoltage <= 0) && (desiredVoltage >= -10)){
-    desiredVoltage = -10;
+
+  if ((positionError < 100) && (defaultGains) && (state == MOVE)){
+    KP = 1; 
+    KD = 0.05;
+    KI = 0.5;
+    desiredFrequency = 0;
+    integralError = 0;
+    defaultGains = false;
   }
 
-  if ((desiredVoltage >= 0) && (state==MOVE)){
+  // Sets range for acceptable frequency for piezo
+  if (desiredFrequency >= 900){
+    desiredFrequency = 900;
+  }
+  else if (desiredFrequency <= -900){
+    desiredFrequency = -900;
+  }
+  else if ((desiredFrequency >= 0) && (desiredFrequency <= 10)){
+    desiredFrequency = 10;
+  }
+  else if ((desiredFrequency <= 0) && (desiredFrequency >= -10)){
+    desiredFrequency = -10;
+  }
+
+  // Changes the speeds here and involves direction (+ or -)
+  if ((desiredFrequency >= 0) && (state==MOVE)){
     if (TOGGLE_STATE){
       signalOutput();
     }
-    changeSpeed(int(desiredVoltage));
+    changeSpeed(int(desiredFrequency));
     reverse();
     signalOutput();
   }
-  else if ((desiredVoltage < 0) && (state==MOVE)){
+  else if ((desiredFrequency < 0) && (state==MOVE)){
     if (TOGGLE_STATE){
       signalOutput();
     }
-    changeSpeed(int(abs(desiredVoltage)));
+    changeSpeed(int(abs(desiredFrequency)));
     forward();
     signalOutput();
   }
@@ -425,10 +429,6 @@ void changeSpeed(long frequency) {
     }
   }
   disp_freq = frequency;
-  // Serial.print("The position is now ");
-  // Serial.println(cursor_location);
-  // Serial.print("The new displayed frequency is ");
-  // Serial.println(disp_freq);
 }
 
 float userInput() {
