@@ -4,11 +4,17 @@ const int PIN_NR_ENCODER_A      = 2;  // Never change these, since the interrupt
 const int PIN_NR_ENCODER_B      = 3;  // Never change these, since the interrupts are attached to pin 2 and 3
 const int CS_PIN                = 4;  // Enables encoder A and B to start when set to LOW 
 // FOR SIGNAL GENERATOR
-const int MODE_X                  = 53; 
-const int CURSOR_X                = 52; 
-const int ADD_X                   = 51; 
-const int SUBTRACT_X              = 50;
-const int SIGNAL_X                = 49; 
+// const int MODE_X                  = 53; 
+// const int CURSOR_X                = 52; 
+// const int ADD_X                   = 51; 
+// const int SUBTRACT_X              = 50;
+// const int SIGNAL_X                = 49; 
+
+const int MODE_Y                  = 22; 
+const int CURSOR_Y                = 23; 
+const int ADD_Y                   = 24; 
+const int SUBTRACT_Y              = 25;
+const int SIGNAL_Y                = 26; 
 
 //** VARIABLE: **//
 // STATE MACHINE:
@@ -82,11 +88,16 @@ void setup() {
   attachInterrupt(1, updatePiezoPosition, CHANGE);  // Interrupt 1 is always attached to digital pin 3
 
   // FOR SIGNAL GEN
-  pinMode(MODE_X,                           OUTPUT);
-  pinMode(CURSOR_X,                         OUTPUT);
-  pinMode(ADD_X,                            OUTPUT);
-  pinMode(SUBTRACT_X,                       OUTPUT);
-  pinMode(SIGNAL_X,                         OUTPUT);
+  // pinMode(MODE_X,                           OUTPUT);
+  // pinMode(CURSOR_X,                         OUTPUT);
+  // pinMode(ADD_X,                            OUTPUT);
+  // pinMode(SUBTRACT_X,                       OUTPUT);
+  // pinMode(SIGNAL_X,                         OUTPUT);
+  pinMode(MODE_Y,                           OUTPUT);
+  pinMode(CURSOR_Y,                         OUTPUT);
+  pinMode(ADD_Y,                            OUTPUT);
+  pinMode(SUBTRACT_Y,                       OUTPUT);
+  pinMode(SIGNAL_Y,                         OUTPUT);
 
   Serial.begin(115200);
 }
@@ -94,9 +105,12 @@ void setup() {
 void loop() {
   switch (state) {
     case CALIBRATE:
-      setSignal(MODE_X, CURSOR_X, ADD_X, SUBTRACT_X);
-      signalOutput(SIGNAL_X); // turn it on
-      setPosition(SIGNAL_X);
+      // setSignal(MODE_X, CURSOR_X, ADD_X, SUBTRACT_X);
+      // signalOutput(SIGNAL_X); // turn it on
+      // setPosition(SIGNAL_X);
+      setSignal(MODE_Y, CURSOR_Y, ADD_Y, SUBTRACT_Y);
+      signalOutput(SIGNAL_Y); // turn it on
+      setPosition(SIGNAL_Y);
 
       //Transition into WAIT state
       //Record which state you came from
@@ -109,7 +123,8 @@ void loop() {
       if (piezoPosition>=targetPosition-TARGET_BAND && piezoPosition<=targetPosition+TARGET_BAND) { // We reached the position
         Serial.println("YOU REACHED THE POSITION");
         if (TOGGLE_STATE){ // make sure the signal generator is off!
-          signalOutput(SIGNAL_X);
+          // signalOutput(SIGNAL_X);
+          signalOutput(SIGNAL_Y);
         }  
         // Start waiting timer:
         startWaitTime = micros();
@@ -203,19 +218,27 @@ void loop() {
   // Changes the speeds here and involves direction (+ or -)
   if ((desiredFrequency >= 0) && (state==MOVE)){
     if (TOGGLE_STATE){
-      signalOutput(SIGNAL_X);
+      // signalOutput(SIGNAL_X);
+      signalOutput(SIGNAL_Y);
     }
-    changeSpeed(int(desiredFrequency), CURSOR_X, ADD_X, SUBTRACT_X);
-    reverse(MODE_X);
-    signalOutput(SIGNAL_X);
+    // changeSpeed(int(desiredFrequency), CURSOR_X, ADD_X, SUBTRACT_X);
+    // reverse(MODE_X);
+    // signalOutput(SIGNAL_X);
+    changeSpeed(int(desiredFrequency), CURSOR_Y, ADD_Y, SUBTRACT_Y);
+    reverse(MODE_Y);
+    signalOutput(SIGNAL_Y);
   }
   else if ((desiredFrequency < 0) && (state==MOVE)){
     if (TOGGLE_STATE){
-      signalOutput(SIGNAL_X);
+      // signalOutput(SIGNAL_X);
+      signalOutput(SIGNAL_Y);
     }
-    changeSpeed(int(abs(desiredFrequency)), CURSOR_X, ADD_X, SUBTRACT_X);
-    forward(MODE_X);
-    signalOutput(SIGNAL_X);
+    // changeSpeed(int(abs(desiredFrequency)), CURSOR_X, ADD_X, SUBTRACT_X);
+    // forward(MODE_X);
+    // signalOutput(SIGNAL_X);
+    changeSpeed(int(abs(desiredFrequency)), CURSOR_Y, ADD_Y, SUBTRACT_Y);
+    forward(MODE_Y);
+    signalOutput(SIGNAL_Y);
   }
   
   Serial.print("CURRENT POSITION: ");
@@ -265,12 +288,12 @@ void signalOutput(int signalPin) {
   delay(DELAY_ON);
   digitalWrite(signalPin, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  // TOGGLE_STATE = !TOGGLE_STATE;
-  // if (!TOGGLE_STATE){
-  //   cursor_location = 6;
-  // }
+  TOGGLE_STATE = !TOGGLE_STATE;
+  if (!TOGGLE_STATE){
+    cursor_location = 6;
+  }
   Serial.print("Turning signal ");
-  // Serial.println(TOGGLE_STATE ? "ON" : "OFF");
+  Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
 
 void forward(int modePin) {
