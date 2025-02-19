@@ -1,36 +1,44 @@
 //** PIN ASSIGNMENT: **//
 // FOR POSITION
-const int PIN_NR_ENCODER_A      = 2;  // Never change these, since the interrupts are attached to pin 2 and 3
-const int PIN_NR_ENCODER_B      = 3;  // Never change these, since the interrupts are attached to pin 2 and 3
-const int CS_PIN                = 4;  // Enables encoder A and B to start when set to LOW 
-// FOR SIGNAL GENERATOR
-// const int MODE_X                  = 53; 
-// const int CURSOR_X                = 52; 
-// const int ADD_X                   = 51; 
-// const int SUBTRACT_X              = 50;
-// const int SIGNAL_X                = 49; 
+const int Y_PIN_NR_ENCODER_A      = 18;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int Y_PIN_NR_ENCODER_B      = 19;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int Y_CS_PIN                = 17;  // Enables encoder A and B to start when set to LOW 
 
-const int MODE_Y                  = 22; 
-const int CURSOR_Y                = 23; 
-const int ADD_Y                   = 24; 
-const int SUBTRACT_Y              = 25;
-const int SIGNAL_Y                = 26; 
+const int X_PIN_NR_ENCODER_A      = 20;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int X_PIN_NR_ENCODER_B      = 21;  // Never change these, since the interrupts are attached to pin 2 and 3
+const int X_CS_PIN                = 16;  // Enables encoder A and B to start when set to LOW 
+
+// FOR SIGNAL GENERATOR
+const int MODE                  = 53; 
+const int CURSOR                = 52; 
+const int ADD                   = 51; 
+const int SUBTRACT              = 50;
+const int SIGNAL                = 49;
+const int X_STAGE               = 10;
+const int Y_STAGE               = 11; 
 
 //** VARIABLE: **//
 // STATE MACHINE:
 // Definition of states in the state machine
-const int CALIBRATE             = 1;
-const int MOVE                  = 2;
-const int WAIT                  = 3;
+const int CALIBRATE_X           = 1;
+const int CALIBRATE_Y           = 2;
+const int AXIS                  = 3;
+const int MOVE                  = 4;
+const int WAIT                  = 5;
 // Global variable that keeps track of the state:
 // Start the state machine in calibration state:
-int  state                      = CALIBRATE;
-int old_state                   = CALIBRATE;
+int  state                      = CALIBRATE_X;
+int old_state                   = CALIBRATE_X;
+bool axis_state                 = 0; // 0 is X axis, 1 is Y axis
 
 // FOR POSITION
-volatile int piezoPosition      = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
-volatile int oldPiezoPosition   = 200;
-volatile int encoderStatus      = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int xPiezoPosition      = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int oldXPiezoPosition   = 200;
+volatile int xEncoderStatus      = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
+
+volatile int yPiezoPosition      = -15000; // [encoder counts] Current piezo position (Declared 'volatile', since it is updated in a function called by interrupts)
+volatile int oldYPiezoPosition   = 200;
+volatile int yEncoderStatus      = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
 // The rightmost two bits of encoderStatus will store the encoder values from the current iteration (A and B).
 // The two bits to the left of those will store the encoder values from the previous iteration (A_old and B_old).
 
@@ -42,7 +50,6 @@ bool calibrationDone            = false;
 const float micronsToCount      = 0.513;
 const float countsToMicrons     = 1.949;
 const int range                 = 5;      // units are in encoder counts
-bool messageDisplayed           = false;  // Global variable to track if message has been displayed
 
 // FOR SIGNAL GEN
 const int DELAY_ON              = 50; 
@@ -78,80 +85,107 @@ const int TARGET_BAND           = 5;      // [encoder counts] "Close enough" ran
 
 void setup() {
   // FOR POSITION
-  pinMode(PIN_NR_ENCODER_A,               INPUT);
-  pinMode(PIN_NR_ENCODER_B,               INPUT); 
-  pinMode(CS_PIN,                         OUTPUT);
-  digitalWrite(CS_PIN,                    LOW);
+  pinMode(X_PIN_NR_ENCODER_A,               INPUT);
+  pinMode(X_PIN_NR_ENCODER_B,               INPUT); 
+  pinMode(X_CS_PIN,                         OUTPUT);
+  digitalWrite(X_CS_PIN,                    LOW);
+
+  pinMode(Y_PIN_NR_ENCODER_A,               INPUT);
+  pinMode(Y_PIN_NR_ENCODER_B,               INPUT); 
+  pinMode(Y_CS_PIN,                         OUTPUT);
+  digitalWrite(Y_CS_PIN,                    LOW);
   // Activate interrupt for encoder pins.
   // If either of the two pins changes, the function 'updatePiezoPosition' is called:
-  attachInterrupt(0, updatePiezoPosition, CHANGE);  // Interrupt 0 is always attached to digital pin 2
-  attachInterrupt(1, updatePiezoPosition, CHANGE);  // Interrupt 1 is always attached to digital pin 3
+  attachInterrupt(digitalPinToInterrupt(X_PIN_NR_ENCODER_A), updateXPosition, CHANGE);  // Interrupt 0 is always attached to digital pin 2
+  attachInterrupt(digitalPinToInterrupt(X_PIN_NR_ENCODER_B), updateXPosition, CHANGE);  // Interrupt 1 is always attached to digital pin 3
+
+  attachInterrupt(digitalPinToInterrupt(Y_PIN_NR_ENCODER_A), updateYPosition, CHANGE);  // Interrupt 0 is always attached to digital pin 2
+  attachInterrupt(digitalPinToInterrupt(Y_PIN_NR_ENCODER_B), updateYPosition, CHANGE);  // Interrupt 1 is always attached to digital pin 3
 
   // FOR SIGNAL GEN
-  // pinMode(MODE_X,                           OUTPUT);
-  // pinMode(CURSOR_X,                         OUTPUT);
-  // pinMode(ADD_X,                            OUTPUT);
-  // pinMode(SUBTRACT_X,                       OUTPUT);
-  // pinMode(SIGNAL_X,                         OUTPUT);
-  pinMode(MODE_Y,                           OUTPUT);
-  pinMode(CURSOR_Y,                         OUTPUT);
-  pinMode(ADD_Y,                            OUTPUT);
-  pinMode(SUBTRACT_Y,                       OUTPUT);
-  pinMode(SIGNAL_Y,                         OUTPUT);
-
+  pinMode(MODE,                           OUTPUT);
+  pinMode(CURSOR,                         OUTPUT);
+  pinMode(ADD,                            OUTPUT);
+  pinMode(SUBTRACT,                       OUTPUT);
+  pinMode(SIGNAL,                         OUTPUT);
+  pinMode(X_STAGE,                        OUTPUT);
+  pinMode(Y_STAGE,                        OUTPUT);
   Serial.begin(115200);
 }
 
 void loop() {
   switch (state) {
-    case CALIBRATE:
-      // setSignal(MODE_X, CURSOR_X, ADD_X, SUBTRACT_X);
-      // signalOutput(SIGNAL_X); // turn it on
-      // setPosition(SIGNAL_X);
-      setSignal(MODE_Y, CURSOR_Y, ADD_Y, SUBTRACT_Y);
-      signalOutput(SIGNAL_Y); // turn it on
-      setPosition(SIGNAL_Y);
+    case CALIBRATE_X:
+      digitalWrite(X_STAGE, HIGH);
+      setSignal();
+      signalOutput(); // turn it on
+      setPosition(xPiezoPosition, oldXPiezoPosition);
+      digitalWrite(X_STAGE, LOW);
 
       //Transition into WAIT state
       //Record which state you came from
-      old_state = CALIBRATE;
+      old_state = CALIBRATE_X;
+      state = WAIT;
+      startWaitTime = micros();
+      break;
+
+    case CALIBRATE_Y:
+      calibrationDone = false;
+      digitalWrite(Y_STAGE, HIGH);
+      signalOutput(); // turn it on
+      setPosition(yPiezoPosition, oldYPiezoPosition);
+      digitalWrite(Y_STAGE, LOW);
+
+      //Transition into WAIT state
+      //Record which state you came from
+      old_state = CALIBRATE_Y;
+      state = WAIT;
+      startWaitTime = micros();
+      break;
+
+    case AXIS:
+      axis_state = userDirection();
+      old_state = AXIS;
       state = WAIT;
       startWaitTime = micros();
       break;
 
     case MOVE:
-      if (piezoPosition>=targetPosition-TARGET_BAND && piezoPosition<=targetPosition+TARGET_BAND) { // We reached the position
-        Serial.println("YOU REACHED THE POSITION");
-        if (TOGGLE_STATE){ // make sure the signal generator is off!
-          // signalOutput(SIGNAL_X);
-          signalOutput(SIGNAL_Y);
-        }  
-        // Start waiting timer:
-        startWaitTime = micros();
-        old_state = MOVE; // Record which state you came from
-        state = WAIT; // Transition into WAIT state
-      } 
+      if (axis_state == 0){
+        enableX();
+        positionReached(xPiezoPosition, targetPosition);
+      } else{
+        enableY();
+        positionReached(yPiezoPosition, targetPosition);
+      }
       // Otherwise we continue moving towards the position
       break;
     
     case WAIT:
       if (micros()-startWaitTime>WAIT_TIME){ // enter WAIT after a certain amount of time
-        if (old_state == CALIBRATE){
-          Serial.println("Waiting for USER INPUT (from CALIBRATE)");
-          state = MOVE;
+        if (old_state == CALIBRATE_X){
+          Serial.println("Finished calibrating X-Stage");
+          state = CALIBRATE_Y;
+          Serial.println("State transition from CALIBRATE_X to CALIBRATE_Y");
+        }
+        if (old_state == CALIBRATE_Y){
+          Serial.println("Finished calibrating Y-Stage");
+          state = AXIS;
+          Serial.println("State transition from CALIBRATE_Y to AXIS");
+        }
+        if (old_state == AXIS){
+          Serial.print("The axis you chose is: ");
+          Serial.println(axis_state == 0 ? "X-Stage" : "Y-Stage");
           targetPosition = userInput();
-          Serial.println("State transition from CALIBRATE to MOVE");
+          state = MOVE;
+          Serial.println("State transition from AXIS to MOVE");
         }
         if (old_state == MOVE){
           Serial.println("Waiting for USER INPUT (from MOVE)");
           state = MOVE;
-          // RESET all the gain values
-          KP = 2.5;  
-          KD = 0.005;
-          KI = 0.005;
-          defaultGains = true;
-          targetPosition = userInput();
-          Serial.println("State transition from MOVE to MOVE");
+          Serial.println("Please choose new axis to move");
+          state = AXIS;
+          Serial.println("State transition from MOVE to AXIS");
         }
       }
       break;
@@ -168,19 +202,20 @@ void loop() {
   lastExecutionTime = micros();
 
   // Speed Computation:
-  if ((abs(piezoPosition - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME){
+  if ((abs((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME) {
+
     // If at least a minimum time interval has elapsed or
     // a minimum distance has been traveled, compute a new value for speed:
     // (speed = delta encoder counts divided by delta time [seconds])
-    piezoVelocity = (double)(piezoPosition - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
+    piezoVelocity = (double)((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
     // Remember this encoder count and time for the next iteration:
-    previousPiezoPosition = piezoPosition;
+    previousPiezoPosition = (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
     previousVelCompTime   = micros();
   }
 
   //** PID control: **//  
   // Compute the position error [encoder counts]
-  positionError = targetPosition - piezoPosition;
+  positionError = targetPosition - (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
   // Compute the integral of the position error  [encoder counts * seconds]
   integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
   // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
@@ -189,17 +224,17 @@ void loop() {
   // position and velocity and the integrated error and computes a
   // desired frequency that should be sent to the piezo:
   desiredFrequency = KP * positionError +  
-                   KI * integralError +
-                   KD * velocityError;
+                     KI * integralError +
+                     KD * velocityError;
 
-  if ((positionError < 100) && (defaultGains) && (state == MOVE)){
-    KP = 1; 
-    KD = 0.05;
-    KI = 0.5;
-    desiredFrequency = 0;
-    integralError = 0;
-    defaultGains = false;
-  }
+  // if ((positionError < 100) && (defaultGains) && (state == MOVE)){
+  //   KP = 1; 
+  //   KD = 0.05;
+  //   KI = 0.5;
+  //   desiredFrequency = 0;
+  //   integralError = 0;
+  //   defaultGains = false;
+  // }
 
   // Sets range for acceptable frequency for piezo
   if (desiredFrequency >= 900){
@@ -218,88 +253,82 @@ void loop() {
   // Changes the speeds here and involves direction (+ or -)
   if ((desiredFrequency >= 0) && (state==MOVE)){
     if (TOGGLE_STATE){
-      // signalOutput(SIGNAL_X);
-      signalOutput(SIGNAL_Y);
+      signalOutput();
     }
-    // changeSpeed(int(desiredFrequency), CURSOR_X, ADD_X, SUBTRACT_X);
-    // reverse(MODE_X);
-    // signalOutput(SIGNAL_X);
-    changeSpeed(int(desiredFrequency), CURSOR_Y, ADD_Y, SUBTRACT_Y);
-    reverse(MODE_Y);
-    signalOutput(SIGNAL_Y);
+    changeSpeed(int(desiredFrequency));
+    reverse();
+    signalOutput();
   }
   else if ((desiredFrequency < 0) && (state==MOVE)){
     if (TOGGLE_STATE){
-      // signalOutput(SIGNAL_X);
-      signalOutput(SIGNAL_Y);
+      signalOutput();
     }
-    // changeSpeed(int(abs(desiredFrequency)), CURSOR_X, ADD_X, SUBTRACT_X);
-    // forward(MODE_X);
-    // signalOutput(SIGNAL_X);
-    changeSpeed(int(abs(desiredFrequency)), CURSOR_Y, ADD_Y, SUBTRACT_Y);
-    forward(MODE_Y);
-    signalOutput(SIGNAL_Y);
+    changeSpeed(int(abs(desiredFrequency)));
+    forward();
+    signalOutput();
   }
-  
-  Serial.print("CURRENT POSITION: ");
-  Serial.println(piezoPosition);
-  Serial.print("Target position: ");
-  Serial.println(targetPosition);
+
+  if (state == MOVE){
+    Serial.print("CURRENT POSITION: ");
+    Serial.println(axis_state == 0 ? xPiezoPosition : yPiezoPosition);
+    Serial.print("Target position: ");
+    Serial.println(targetPosition);
+  }
 }
 
-void mode(int modePin) {
-  digitalWrite(modePin, HIGH); // Turn on the MOSFET
+void mode() {
+  digitalWrite(MODE, HIGH); // Turn on the MOSFET
   delay(DELAY_ON);
-  digitalWrite(modePin, LOW);  // Turn off the MOSFET
+  digitalWrite(MODE, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("Changing MODE");
+  // Serial.println("Changing MODE");
 }
 
-void cursor(int cursorPin) {
-  digitalWrite(cursorPin, HIGH); // Turn on the MOSFET
+void cursor() {
+  digitalWrite(CURSOR, HIGH); // Turn on the MOSFET
   delay(DELAY_ON);
-  digitalWrite(cursorPin, LOW);  // Turn off the MOSFET
+  digitalWrite(CURSOR, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("Changing CURSOR");
-  // cursor_location = cursor_location-1;
-  // if (cursor_location == 0){ // help loop it back
-  //   cursor_location = 6;
-  // }
+  // Serial.println("Changing CURSOR");
+  cursor_location = cursor_location-1;
+  if (cursor_location == 0){ // help loop it back
+    cursor_location = 6;
+  }
 }
 
-void increment(int addPin) {
-  digitalWrite(addPin, HIGH); // Turn on the MOSFET
+void increment() {
+  digitalWrite(ADD, HIGH); // Turn on the MOSFET
   delay(DELAY_ON);
-  digitalWrite(addPin, LOW);  // Turn off the MOSFET
+  digitalWrite(ADD, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("INCREASING");
+  // Serial.println("INCREASING");
 }
 
-void decrement(int subtractPin) {
-  digitalWrite(subtractPin, HIGH); // Turn on the MOSFET
+void decrement() {
+  digitalWrite(SUBTRACT, HIGH); // Turn on the MOSFET
   delay(DELAY_ON);
-  digitalWrite(subtractPin, LOW);  // Turn off the MOSFET
+  digitalWrite(SUBTRACT, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
-  Serial.println("DECREASING");
+  // Serial.println("DECREASING");
 }
 
-void signalOutput(int signalPin) {
-  digitalWrite(signalPin, HIGH); // Turn on the MOSFET
+void signalOutput() {
+  digitalWrite(SIGNAL, HIGH); // Turn on the MOSFET
   delay(DELAY_ON);
-  digitalWrite(signalPin, LOW);  // Turn off the MOSFET
+  digitalWrite(SIGNAL, LOW);  // Turn off the MOSFET
   delay(DELAY_OFF);
   TOGGLE_STATE = !TOGGLE_STATE;
   if (!TOGGLE_STATE){
     cursor_location = 6;
   }
-  Serial.print("Turning signal ");
-  Serial.println(TOGGLE_STATE ? "ON" : "OFF");
+  // Serial.print("Turning signal ");
+  // Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
 
-void forward(int modePin) {
+void forward() {
   if (!direction){ // if it's in reverse mode, do this
     for (int i = 0; i < 6; i++) {
-      mode(modePin);
+      mode();
     }
     direction = true;
   } else{
@@ -307,34 +336,34 @@ void forward(int modePin) {
   }
 }
 
-void reverse(int modePin) {
+void reverse() {
   if (direction){
-    mode(modePin);
+    mode();
     direction = false;
   } else{
     return;
   }
 }
 
-void setSignal(int modePin, int cursorPin, int addPin, int subtractPin) {
+void setSignal() {
   for (int i = 0; i < 3; i++) {
-    mode(modePin);
+    mode();
     direction = true; // making it move forward now
   }
-  changeSpeed(1000, cursorPin, addPin, subtractPin);
+  changeSpeed(1000);
   Serial.println("Finished CALIBRATION");
   Serial.println("Starting in 1 sec");
   delay(1000);
 }
 
-void setPosition(int signalPin) {  
+void setPosition(volatile int &piezoPosition, volatile int &oldPiezoPosition) {
   while((piezoPosition != 0) && (!calibrationDone)){
     if ((piezoPosition >= oldPiezoPosition - calibrateRange) && 
         (piezoPosition <= oldPiezoPosition + calibrateRange)) {
       if (startTime == 0) {
         startTime = millis();
       } else if (millis() - startTime >= duration) {
-        signalOutput(signalPin);
+        signalOutput();
         piezoPosition = 0;
         calibrationDone = true;
         Serial.println("Finished calibrating position");
@@ -351,13 +380,13 @@ void setPosition(int signalPin) {
   }
 }
 
-void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
+void changeSpeed(long frequency) {
   String old_freq = String(disp_freq);
   String new_freq = String(frequency);
   if (old_freq.length() > new_freq.length()){
     int new_cursor_position = cursor_location - old_freq.length();
     for (int i = 0; i < new_cursor_position; i++){
-      cursor(cursorPin);
+      cursor();
     }
     for (int i = old_freq.length(); i > 0; i--) {
       if (i <= new_freq.length()){ // once the old and new frequency have same digits
@@ -368,13 +397,13 @@ void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
         int diff = new_freq_i - old_freq_i;
         if (diff > 0){
           for (int i = 0; i < diff; i++){
-            increment(addPin);
+            increment();
           }
         }
         else if (diff < 0){
           diff = abs(diff);
           for (int i = 0; i < diff; i++){
-            decrement(subtractPin);
+            decrement();
           }
         }
       }
@@ -383,17 +412,17 @@ void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
         int old_freq_i = old_freq_c - '0';
         if (old_freq_i > 0){
           for (int i = 0; i < old_freq_i; i++){
-            decrement(subtractPin);
+            decrement();
           }
         }
       }
-      cursor(cursorPin);
+      cursor();
     }
   }
   else if (old_freq.length() == new_freq.length()){
     int new_cursor_position = cursor_location - old_freq.length();
     for (int i = 0; i < new_cursor_position; i++){
-      cursor(cursorPin);
+      cursor();
     }
     for (int i = old_freq.length(); i > 0; i--) {
       char old_freq_c = old_freq[old_freq.length()-i];
@@ -403,22 +432,22 @@ void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
       int diff = new_freq_i - old_freq_i;
       if (diff > 0){
         for (int i = 0; i < diff; i++){
-          increment(addPin);
+          increment();
         }
       }
       else if (diff < 0){
         diff = abs(diff);
         for (int i = 0; i < diff; i++){
-          decrement(subtractPin);
+          decrement();
         }
       }
-      cursor(cursorPin);
+      cursor();
     }
   }
   else if (new_freq.length() > old_freq.length()){
     int new_cursor_position = cursor_location - new_freq.length();
     for (int i = 0; i < new_cursor_position; i++){
-      cursor(cursorPin);
+      cursor();
     }
     for (int i = new_freq.length(); i > 0; i--) {
       if (i <= old_freq.length()){ // once the old and new frequency have same digits
@@ -429,13 +458,13 @@ void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
         int diff = new_freq_i - old_freq_i;
         if (diff > 0){
           for (int i = 0; i < diff; i++){
-            increment(addPin);
+            increment();
           }
         }
         else if (diff < 0){
           diff = abs(diff);
           for (int i = 0; i < diff; i++){
-            decrement(subtractPin);
+            decrement();
           }
         }
       }
@@ -444,22 +473,34 @@ void changeSpeed(long frequency, int cursorPin, int addPin, int subtractPin) {
         int new_freq_i = new_freq_c - '0';
         if (new_freq_i > 0){
           for (int i = 0; i < new_freq_i; i++){
-            increment(addPin);
+            increment();
           }
         }
       }
-      cursor(cursorPin);
+      cursor();
     }
   }
   disp_freq = frequency;
 }
 
+bool userDirection() {
+  bool value = 0; // 0 = X, 1 = Y
+  Serial.println("Direction: X or Y?");  
+  while (Serial.available() == 0) {
+    // Wait for user input
+  }
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    if ((input == "Y") || (input == "y")){
+      value = 1;
+    }
+  }
+  return value;
+}
+
 float userInput() {
   float value = 0; 
-  if (!messageDisplayed) {
-    Serial.println("Type in the position (microns) you want to move to!");
-    messageDisplayed = true;
-  }  
+  Serial.println("Type in the position (microns) you want to move to!");
   while (Serial.available() == 0) {
     // Wait for user input
   }
@@ -470,31 +511,78 @@ float userInput() {
   return value;
 }
 
+void positionReached(volatile int &piezoPosition, int target) {
+  if (piezoPosition>=target-TARGET_BAND && piezoPosition<=target+TARGET_BAND) { // We reached the position
+    Serial.println("YOU REACHED THE POSITION");
+    if (TOGGLE_STATE){ // make sure the signal generator is off!
+      signalOutput();
+    }  
+    // Start waiting timer:
+    startWaitTime = micros();
+    old_state = MOVE; // Record which state you came from
+    state = WAIT; // Transition into WAIT state
+  } 
+}
+
+void enableX() {
+  digitalWrite(Y_STAGE, LOW);
+  digitalWrite(X_STAGE, HIGH);
+}
+
+void enableY() {
+  digitalWrite(X_STAGE, LOW);
+  digitalWrite(Y_STAGE, HIGH);
+}
+
 //////////////////////////////////////////////////////////////////////
 // This is a function to update the encoder count in the Arduino.   //
 // It is called via an interrupt whenever the value on encoder      //
 // channel A or B changes.                                          //
 //////////////////////////////////////////////////////////////////////
-void updatePiezoPosition() {
+void updateXPosition() {
   // Bitwise shift left by one bit, to make room for a bit of new data:
-  encoderStatus <<= 1;   
+  xEncoderStatus <<= 1;   
   // Use a compound bitwise OR operator (|=) to read the A channel of the encoder (pin 2)
   // and put that value into the rightmost bit of encoderStatus:
-  encoderStatus |= digitalRead(PIN_NR_ENCODER_A);   
+  xEncoderStatus |= digitalRead(X_PIN_NR_ENCODER_A);   
   // Bitwise shift left by one bit, to make room for a bit of new data:
-  encoderStatus <<= 1;
+  xEncoderStatus <<= 1;
   // Use a compound bitwise OR operator  (|=) to read the B channel of the encoder (pin 3)
   // and put that value into the rightmost bit of encoderStatus:
-  encoderStatus |= digitalRead(PIN_NR_ENCODER_B);
+  xEncoderStatus |= digitalRead(X_PIN_NR_ENCODER_B);
   // encoderStatus is truncated to only contain the rightmost 4 bits by  using a 
   // bitwise AND operator on mstatus and 15(=1111):
-  encoderStatus &= 15;
-  if (encoderStatus==2 || encoderStatus==4 || encoderStatus==11 || encoderStatus==13) {
+  xEncoderStatus &= 15;
+  if (xEncoderStatus==2 || xEncoderStatus==4 || xEncoderStatus==11 || xEncoderStatus==13) {
     // the encoder status matches a bit pattern that requires counting up by one
-    piezoPosition++;         // increase the encoder count by one
+    xPiezoPosition++;         // increase the encoder count by one
   } else {
     // the encoder status does not match a bit pattern that requires counting up by one.  
     // Since this function is only called if something has changed, we have to count downwards
-    piezoPosition--;         // decrease the encoder count by one
+    xPiezoPosition--;         // decrease the encoder count by one
+  }
+}
+
+void updateYPosition() {
+  // Bitwise shift left by one bit, to make room for a bit of new data:
+  yEncoderStatus <<= 1;   
+  // Use a compound bitwise OR operator (|=) to read the A channel of the encoder (pin 2)
+  // and put that value into the rightmost bit of encoderStatus:
+  yEncoderStatus |= digitalRead(Y_PIN_NR_ENCODER_A);   
+  // Bitwise shift left by one bit, to make room for a bit of new data:
+  yEncoderStatus <<= 1;
+  // Use a compound bitwise OR operator  (|=) to read the B channel of the encoder (pin 3)
+  // and put that value into the rightmost bit of encoderStatus:
+  yEncoderStatus |= digitalRead(Y_PIN_NR_ENCODER_B);
+  // encoderStatus is truncated to only contain the rightmost 4 bits by  using a 
+  // bitwise AND operator on mstatus and 15(=1111):
+  yEncoderStatus &= 15;
+  if (yEncoderStatus==2 || yEncoderStatus==4 || yEncoderStatus==11 || yEncoderStatus==13) {
+    // the encoder status matches a bit pattern that requires counting up by one
+    yPiezoPosition++;         // increase the encoder count by one
+  } else {
+    // the encoder status does not match a bit pattern that requires counting up by one.  
+    // Since this function is only called if something has changed, we have to count downwards
+    yPiezoPosition--;         // decrease the encoder count by one
   }
 }
