@@ -84,6 +84,27 @@ unsigned long startWaitTime;              // [microseconds] System clock value a
 const long  WAIT_TIME           = 1000000;// [microseconds] Time waiting at each location
 const int TARGET_BAND           = 5;      // [encoder counts] "Close enough" range when moving towards a target.
 
+// USER INPUT:
+const int NUM_POSITIONS = 7;
+struct Position {
+  bool axis;  // 0 = X, 1 = Y
+  float positionMicrons;  // Target position in microns
+  int positionCounts;     // Converted to encoder counts
+};
+
+Position targetPositions[NUM_POSITIONS] = {
+  {0, 3000.0, 0},
+  {1, 1000.0, 0}, 
+  {0, 100.0, 0},  
+  {1, 200.0, 0}, 
+  {0, 3000.0, 0},
+  {1, 400.0, 0},
+  {0, 100.0, 0},    
+};
+
+// Index to track current position in the sequence
+int currentPositionIndex = 0;
+
 void setup() {
   // FOR POSITION
   pinMode(X_PIN_NR_ENCODER_A,               INPUT);
@@ -113,20 +134,10 @@ void setup() {
   pinMode(Y_STAGE,                        OUTPUT);
   Serial.begin(115200);
   
-  // digitalWrite(X_STAGE, HIGH);
-  // setSignal();
-  // signalOutput(); // turn it on
-  // setPosition(xPiezoPosition, oldXPiezoPosition);
-  // digitalWrite(X_STAGE, LOW);
-  // calibrationDone = false;
-  // digitalWrite(Y_STAGE, HIGH);
-  // signalOutput(); // turn it on
-  // setPosition(yPiezoPosition, oldYPiezoPosition);
-  // digitalWrite(Y_STAGE, LOW);
-  // enableY();
-  // axis_state = 1;
-  // changeSpeed(5);
-  // reverse();
+  // Convert all positions from microns to encoder counts
+  for (int i = 0; i < NUM_POSITIONS; i++) {
+    targetPositions[i].positionCounts = targetPositions[i].positionMicrons * micronsToCount;
+  }
 }
 
 void loop() {
@@ -160,7 +171,8 @@ void loop() {
       break;
 
     case AXIS:
-      axis_state = userDirection();
+      // axis_state = userDirection();
+      axis_state = targetPositions[currentPositionIndex].axis;
       old_state = AXIS;
       state = WAIT;
       startWaitTime = micros();
@@ -172,6 +184,9 @@ void loop() {
       } else{
         enableY();
       }
+      targetPosition = targetPositions[currentPositionIndex].positionCounts;
+      Serial.print("Your new target position is: ");
+      Serial.println(targetPosition);
       if ((axis_state == 0 ? xPiezoPosition : yPiezoPosition)>=targetPosition-TARGET_BAND && (axis_state == 0 ? xPiezoPosition : yPiezoPosition)<=targetPosition+TARGET_BAND) { // We reached the position
         Serial.println("YOU REACHED THE POSITION");
         if (TOGGLE_STATE){ // make sure the signal generator is off!
@@ -195,22 +210,26 @@ void loop() {
         if (old_state == CALIBRATE_Y){
           Serial.println("Finished calibrating Y-Stage");
           state = AXIS;
+          currentPositionIndex = 0;
           Serial.println("State transition from CALIBRATE_Y to AXIS");
         }
         if (old_state == AXIS){
-          Serial.print("The axis you chose is: ");
-          Serial.println(axis_state == 0 ? "X-Stage" : "Y-Stage");
-          targetPosition = userInput();
+          // Serial.print("The axis you chose is: ");
+          // Serial.println(axis_state == 0 ? "X-Stage" : "Y-Stage");
+          // targetPosition = userInput();
           state = MOVE;
           integralError = 0;
           Serial.println("State transition from AXIS to MOVE");
         }
         if (old_state == MOVE){
-          Serial.println("Waiting for USER INPUT (from MOVE)");
-          state = MOVE;
-          Serial.println("Please choose new axis to move");
-          state = AXIS;
-          Serial.println("State transition from MOVE to AXIS");
+          currentPositionIndex++;
+          if (currentPositionIndex < NUM_POSITIONS) {
+            state = AXIS;  // Move to next position
+            Serial.println("State transition from MOVE to AXIS");
+          } else {
+            Serial.println("All positions completed!");
+            while (1);  // Stop after all positions are done
+          }
         }
       }
       break;
@@ -388,8 +407,8 @@ void signalOutput() {
   if (!TOGGLE_STATE){
     cursor_location = 6;
   }
-  Serial.print("Turning signal ");
-  Serial.println(TOGGLE_STATE ? "ON" : "OFF");
+  // Serial.print("Turning signal ");
+  // Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
 
 void forward() {
