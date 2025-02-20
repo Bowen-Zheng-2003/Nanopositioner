@@ -74,9 +74,10 @@ int previousPiezoPosition       = 0;      // [encoder counts] Piezo position the
 long previousVelCompTime        = 0;      // [microseconds] System clock value the last time a velocity was computed 
 const int  MIN_VEL_COMP_COUNT   = 2;      // [encoder counts] Minimal change in piezo position that must happen between two velocity measurements
 const long MIN_VEL_COMP_TIME    = 10000;  // [microseconds] Minimal time that must pass between two velocity measurements
-float KP                        = 2.5;    // [Volt / encoder counts] P-Gain
-float KD                        = 0.005;  // [Volt * seconds / encoder counts] D-Gain
-float KI                        = 0.005;  // [Volt / (encoder counts * seconds)] I-Gain
+int numOfPresses                = 0;
+const float KP                  = 2.5;    // [Volt / encoder counts] P-Gain
+const float KD                  = 0.005;  // [Volt * seconds / encoder counts] D-Gain
+const float KI                  = 0.005;  // [Volt / (encoder counts * seconds)] I-Gain
 
 // Timing:
 unsigned long startWaitTime;              // [microseconds] System clock value at the moment the WAIT state started
@@ -111,6 +112,21 @@ void setup() {
   pinMode(X_STAGE,                        OUTPUT);
   pinMode(Y_STAGE,                        OUTPUT);
   Serial.begin(115200);
+  
+  // digitalWrite(X_STAGE, HIGH);
+  // setSignal();
+  // signalOutput(); // turn it on
+  // setPosition(xPiezoPosition, oldXPiezoPosition);
+  // digitalWrite(X_STAGE, LOW);
+  // calibrationDone = false;
+  // digitalWrite(Y_STAGE, HIGH);
+  // signalOutput(); // turn it on
+  // setPosition(yPiezoPosition, oldYPiezoPosition);
+  // digitalWrite(Y_STAGE, LOW);
+  // enableY();
+  // axis_state = 1;
+  // changeSpeed(5);
+  // reverse();
 }
 
 void loop() {
@@ -153,11 +169,19 @@ void loop() {
     case MOVE:
       if (axis_state == 0){
         enableX();
-        positionReached(xPiezoPosition, targetPosition);
       } else{
         enableY();
-        positionReached(yPiezoPosition, targetPosition);
       }
+      if ((axis_state == 0 ? xPiezoPosition : yPiezoPosition)>=targetPosition-TARGET_BAND && (axis_state == 0 ? xPiezoPosition : yPiezoPosition)<=targetPosition+TARGET_BAND) { // We reached the position
+        Serial.println("YOU REACHED THE POSITION");
+        if (TOGGLE_STATE){ // make sure the signal generator is off!
+          signalOutput();
+        }  
+        // Start waiting timer:
+        startWaitTime = micros();
+        old_state = MOVE; // Record which state you came from
+        state = WAIT; // Transition into WAIT state
+      } 
       // Otherwise we continue moving towards the position
       break;
     
@@ -178,6 +202,7 @@ void loop() {
           Serial.println(axis_state == 0 ? "X-Stage" : "Y-Stage");
           targetPosition = userInput();
           state = MOVE;
+          integralError = 0;
           Serial.println("State transition from AXIS to MOVE");
         }
         if (old_state == MOVE){
@@ -201,72 +226,114 @@ void loop() {
   executionDuration = micros() - lastExecutionTime;
   lastExecutionTime = micros();
 
-  // Speed Computation:
-  if ((abs((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME) {
-
-    // If at least a minimum time interval has elapsed or
-    // a minimum distance has been traveled, compute a new value for speed:
-    // (speed = delta encoder counts divided by delta time [seconds])
-    piezoVelocity = (double)((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
-    // Remember this encoder count and time for the next iteration:
-    previousPiezoPosition = (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
-    previousVelCompTime   = micros();
-  }
-
-  //** PID control: **//  
   // Compute the position error [encoder counts]
   positionError = targetPosition - (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
-  // Compute the integral of the position error  [encoder counts * seconds]
-  integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
-  // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
-  velocityError = 0 - piezoVelocity;
-  // This is the actual controller function that uses the error in 
-  // position and velocity and the integrated error and computes a
-  // desired frequency that should be sent to the piezo:
-  desiredFrequency = KP * positionError +  
-                     KI * integralError +
-                     KD * velocityError;
+  
+  if ((abs(positionError) < 100) && (state == MOVE)){
+    numOfPresses = abs(positionError/2);
+    Serial.print("numOfPresses is ");
+    Serial.println(numOfPresses);
+    if (positionError >= 0){
+      if (TOGGLE_STATE){
+        signalOutput();
+      }
+      desiredFrequency = 5;
+      changeSpeed(int(desiredFrequency));
+      reverse();
+      for (int i = 0; i < numOfPresses; i++) {
+        signalOutput();
+        delay(50);
+        signalOutput();
+        delay(100);
+        Serial.println("Entering positive fine control now");
+        Serial.print("CURRENT POSITION: ");
+        Serial.println(axis_state == 0 ? xPiezoPosition : yPiezoPosition);
+        Serial.print("Target position: ");
+        Serial.println(targetPosition);
+      }
+    } 
+    else{
+      if (TOGGLE_STATE){
+        signalOutput();
+      }
+      desiredFrequency = 5;
+      changeSpeed(int(desiredFrequency));
+      forward();
+      for (int i = 0; i < numOfPresses; i++) {
+        signalOutput();
+        delay(50);
+        signalOutput();
+        delay(100);
+        Serial.println("Entering negative fine control now");
+        Serial.print("CURRENT POSITION: ");
+        Serial.println(axis_state == 0 ? xPiezoPosition : yPiezoPosition);
+        Serial.print("Target position: ");
+        Serial.println(targetPosition);
+      }
+    }
+  }
 
-  // if ((positionError < 100) && (defaultGains) && (state == MOVE)){
-  //   KP = 1; 
-  //   KD = 0.05;
-  //   KI = 0.5;
+  else if ((abs(positionError) > 100) && (state == MOVE)){
+    // Speed Computation:
+    if ((abs((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME) {
+
+      // If at least a minimum time interval has elapsed or
+      // a minimum distance has been traveled, compute a new value for speed:
+      // (speed = delta encoder counts divided by delta time [seconds])
+      piezoVelocity = (double)((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
+      // Remember this encoder count and time for the next iteration:
+      previousPiezoPosition = (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
+      previousVelCompTime   = micros();
+    }
+
+    //** PID control: **//  
+    // Compute the integral of the position error  [encoder counts * seconds]
+    integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
+    // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
+    velocityError = 0 - piezoVelocity;
+    // This is the actual controller function that uses the error in 
+    // position and velocity and the integrated error and computes a
+    // desired frequency that should be sent to the piezo:
+    desiredFrequency = KP * positionError +  
+                      KI * integralError +
+                      KD * velocityError;
+
+    // Sets range for acceptable frequency for piezo
+    if (desiredFrequency >= 900){
+      desiredFrequency = 900;
+    }
+    else if (desiredFrequency <= -900){
+      desiredFrequency = -900;
+    }
+    else if ((desiredFrequency >= 0) && (desiredFrequency <= 10)){
+      desiredFrequency = 10;
+    }
+    else if ((desiredFrequency <= 0) && (desiredFrequency >= -10)){
+      desiredFrequency = -10;
+    }
+
+    // Changes the speeds here and involves direction (+ or -)
+    if ((desiredFrequency >= 0) && (state==MOVE)){
+      if (TOGGLE_STATE){
+        signalOutput();
+      }
+      changeSpeed(int(desiredFrequency));
+      reverse();
+      signalOutput();
+    }
+    else if ((desiredFrequency < 0) && (state==MOVE)){
+      if (TOGGLE_STATE){
+        signalOutput();
+      }
+      changeSpeed(int(abs(desiredFrequency)));
+      forward();
+      signalOutput();
+    }
+  }
+  // else{
   //   desiredFrequency = 0;
-  //   integralError = 0;
-  //   defaultGains = false;
+  //   Serial.println("Error reached - please check bang bang and PID control");
   // }
-
-  // Sets range for acceptable frequency for piezo
-  if (desiredFrequency >= 900){
-    desiredFrequency = 900;
-  }
-  else if (desiredFrequency <= -900){
-    desiredFrequency = -900;
-  }
-  else if ((desiredFrequency >= 0) && (desiredFrequency <= 10)){
-    desiredFrequency = 10;
-  }
-  else if ((desiredFrequency <= 0) && (desiredFrequency >= -10)){
-    desiredFrequency = -10;
-  }
-
-  // Changes the speeds here and involves direction (+ or -)
-  if ((desiredFrequency >= 0) && (state==MOVE)){
-    if (TOGGLE_STATE){
-      signalOutput();
-    }
-    changeSpeed(int(desiredFrequency));
-    reverse();
-    signalOutput();
-  }
-  else if ((desiredFrequency < 0) && (state==MOVE)){
-    if (TOGGLE_STATE){
-      signalOutput();
-    }
-    changeSpeed(int(abs(desiredFrequency)));
-    forward();
-    signalOutput();
-  }
 
   if (state == MOVE){
     Serial.print("CURRENT POSITION: ");
@@ -321,8 +388,8 @@ void signalOutput() {
   if (!TOGGLE_STATE){
     cursor_location = 6;
   }
-  // Serial.print("Turning signal ");
-  // Serial.println(TOGGLE_STATE ? "ON" : "OFF");
+  Serial.print("Turning signal ");
+  Serial.println(TOGGLE_STATE ? "ON" : "OFF");
 }
 
 void forward() {
@@ -509,19 +576,6 @@ float userInput() {
     value = input.toFloat()*micronsToCount;
   }
   return value;
-}
-
-void positionReached(volatile int &piezoPosition, int target) {
-  if (piezoPosition>=target-TARGET_BAND && piezoPosition<=target+TARGET_BAND) { // We reached the position
-    Serial.println("YOU REACHED THE POSITION");
-    if (TOGGLE_STATE){ // make sure the signal generator is off!
-      signalOutput();
-    }  
-    // Start waiting timer:
-    startWaitTime = micros();
-    old_state = MOVE; // Record which state you came from
-    state = WAIT; // Transition into WAIT state
-  } 
 }
 
 void enableX() {
