@@ -50,6 +50,8 @@ bool calibrationDone            = false;
 const float micronsToCount      = 0.513;
 const float countsToMicrons     = 1.949;
 const int range                 = 5;      // units are in encoder counts
+const int useFinePosition       = 5;
+const int useCoarsePosition     = 100;
 
 // FOR SIGNAL GEN
 const int DELAY_ON              = 50; 
@@ -82,10 +84,10 @@ const float KI                  = 0.005;  // [Volt / (encoder counts * seconds)]
 // Timing:
 unsigned long startWaitTime;              // [microseconds] System clock value at the moment the WAIT state started
 const long  WAIT_TIME           = 1000000;// [microseconds] Time waiting at each location
-const int TARGET_BAND           = 5;      // [encoder counts] "Close enough" range when moving towards a target.
+const int TARGET_BAND           = 0;      // [encoder counts] "Close enough" range when moving towards a target.
 
 // USER INPUT:
-const int NUM_POSITIONS = 7;
+const int NUM_POSITIONS = 1;
 struct Position {
   bool axis;  // 0 = X, 1 = Y
   float positionMicrons;  // Target position in microns
@@ -93,13 +95,7 @@ struct Position {
 };
 
 Position targetPositions[NUM_POSITIONS] = {
-  {0, 3000.0, 0},
-  {1, 1000.0, 0}, 
-  {0, 100.0, 0},  
-  {1, 200.0, 0}, 
-  {0, 3000.0, 0},
-  {1, 400.0, 0},
-  {0, 100.0, 0},    
+  {1, 10000.0, 0},  
 };
 
 // Index to track current position in the sequence
@@ -248,7 +244,7 @@ void loop() {
   // Compute the position error [encoder counts]
   positionError = targetPosition - (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
   
-  if ((abs(positionError) < 100) && (state == MOVE)){
+  if ((abs(positionError) < useFinePosition) && (state == MOVE)){
     numOfPresses = abs(positionError/2);
     Serial.print("numOfPresses is ");
     Serial.println(numOfPresses);
@@ -271,7 +267,7 @@ void loop() {
         Serial.println(targetPosition);
       }
     } 
-    else{
+    else{ // you need to go the opposite direction
       if (TOGGLE_STATE){
         signalOutput();
       }
@@ -292,62 +288,78 @@ void loop() {
     }
   }
 
-  else if ((abs(positionError) > 100) && (state == MOVE)){
-    // Speed Computation:
-    if ((abs((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME) {
-
-      // If at least a minimum time interval has elapsed or
-      // a minimum distance has been traveled, compute a new value for speed:
-      // (speed = delta encoder counts divided by delta time [seconds])
-      piezoVelocity = (double)((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
-      // Remember this encoder count and time for the next iteration:
-      previousPiezoPosition = (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
-      previousVelCompTime   = micros();
-    }
-
-    //** PID control: **//  
-    // Compute the integral of the position error  [encoder counts * seconds]
-    integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
-    // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
-    velocityError = 0 - piezoVelocity;
-    // This is the actual controller function that uses the error in 
-    // position and velocity and the integrated error and computes a
-    // desired frequency that should be sent to the piezo:
-    desiredFrequency = KP * positionError +  
-                      KI * integralError +
-                      KD * velocityError;
-
-    // Sets range for acceptable frequency for piezo
-    if (desiredFrequency >= 900){
-      desiredFrequency = 900;
-    }
-    else if (desiredFrequency <= -900){
-      desiredFrequency = -900;
-    }
-    else if ((desiredFrequency >= 0) && (desiredFrequency <= 10)){
-      desiredFrequency = 10;
-    }
-    else if ((desiredFrequency <= 0) && (desiredFrequency >= -10)){
-      desiredFrequency = -10;
-    }
-
-    // Changes the speeds here and involves direction (+ or -)
-    if ((desiredFrequency >= 0) && (state==MOVE)){
-      if (TOGGLE_STATE){
+  else if ((abs(positionError) > useFinePosition) && (state == MOVE)){
+    if (positionError >= 0){
+      if (desiredFrequency != useCoarsePosition){
+        desiredFrequency = useCoarsePosition;
+        changeSpeed(int(desiredFrequency));
+        reverse();
         signalOutput();
       }
-      changeSpeed(int(desiredFrequency));
-      reverse();
-      signalOutput();
     }
-    else if ((desiredFrequency < 0) && (state==MOVE)){
-      if (TOGGLE_STATE){
+    else { // you need to go the opposite direction
+      if (desiredFrequency != useCoarsePosition){
+        desiredFrequency = useCoarsePosition;
+        changeSpeed(int(desiredFrequency));
+        forward();
         signalOutput();
       }
-      changeSpeed(int(abs(desiredFrequency)));
-      forward();
-      signalOutput();
     }
+    // // Speed Computation:
+    // if ((abs((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTime) > MIN_VEL_COMP_TIME) {
+
+    //   // If at least a minimum time interval has elapsed or
+    //   // a minimum distance has been traveled, compute a new value for speed:
+    //   // (speed = delta encoder counts divided by delta time [seconds])
+    //   piezoVelocity = (double)((axis_state == 0 ? xPiezoPosition : yPiezoPosition) - previousPiezoPosition) * 1000000 / (micros() - previousVelCompTime);
+    //   // Remember this encoder count and time for the next iteration:
+    //   previousPiezoPosition = (axis_state == 0 ? xPiezoPosition : yPiezoPosition);
+    //   previousVelCompTime   = micros();
+    // }
+
+    // //** PID control: **//  
+    // // Compute the integral of the position error  [encoder counts * seconds]
+    // integralError = integralError + positionError * (float)(executionDuration) / 1000000; 
+    // // Compute the velocity error (desired velocity is 0) [encoder counts / seconds]
+    // velocityError = 0 - piezoVelocity;
+    // // This is the actual controller function that uses the error in 
+    // // position and velocity and the integrated error and computes a
+    // // desired frequency that should be sent to the piezo:
+    // desiredFrequency = KP * positionError +  
+    //                   KI * integralError +
+    //                   KD * velocityError;
+
+    // // Sets range for acceptable frequency for piezo
+    // if (desiredFrequency >= 900){
+    //   desiredFrequency = 900;
+    // }
+    // else if (desiredFrequency <= -900){
+    //   desiredFrequency = -900;
+    // }
+    // else if ((desiredFrequency >= 0) && (desiredFrequency <= 10)){
+    //   desiredFrequency = 10;
+    // }
+    // else if ((desiredFrequency <= 0) && (desiredFrequency >= -10)){
+    //   desiredFrequency = -10;
+    // }
+
+    // // Changes the speeds here and involves direction (+ or -)
+    // if ((desiredFrequency >= 0) && (state==MOVE)){
+    //   if (TOGGLE_STATE){
+    //     signalOutput();
+    //   }
+    //   changeSpeed(int(desiredFrequency));
+    //   reverse();
+    //   signalOutput();
+    // }
+    // else if ((desiredFrequency < 0) && (state==MOVE)){
+    //   if (TOGGLE_STATE){
+    //     signalOutput();
+    //   }
+    //   changeSpeed(int(abs(desiredFrequency)));
+    //   forward();
+    //   signalOutput();
+    // }
   }
   // else{
   //   desiredFrequency = 0;
