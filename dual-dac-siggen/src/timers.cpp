@@ -71,8 +71,10 @@ void setup_dac(void){
 // our dmac buffer ... 12 bits,
 #define DMAC_WAVE_SIZE 4096
 // we want two, and two descriptors, just to avoid witches in the DMAC 
-uint16_t dmac_wave_0[DMAC_WAVE_SIZE];
-uint16_t dmac_wave_1[DMAC_WAVE_SIZE];
+uint16_t dmac_wave_fwd_0[DMAC_WAVE_SIZE]; // fwds dir 
+uint16_t dmac_wave_fwd_1[DMAC_WAVE_SIZE]; // fwds dir 
+uint16_t dmac_wave_rev_0[DMAC_WAVE_SIZE]; // rev dir 
+uint16_t dmac_wave_rev_1[DMAC_WAVE_SIZE]; // rev dir 
 
 // we allocate 32 each, *just in case* CH2 > is ever enabled, 
 // it won't point at garbage and hard fault 
@@ -82,8 +84,10 @@ static DmacDescriptor wb_descriptors[32] __attribute__((aligned(16)));
 void setup_dmac(void){
   // write vals 2 wave
   for(uint16_t i = 0; i < DMAC_WAVE_SIZE; i ++){
-    dmac_wave_0[i] = i;
-    dmac_wave_1[i] = i;
+    dmac_wave_fwd_0[i] = i;
+    dmac_wave_fwd_1[i] = i;
+    dmac_wave_rev_0[i] = DMAC_WAVE_SIZE - 1 - i;
+    dmac_wave_rev_1[i] = DMAC_WAVE_SIZE - 1 - i;
   }
   // setup dmac ... 
   // disable to config 
@@ -119,7 +123,7 @@ void setup_dmac(void){
   descriptors[0].BTCTRL.bit.STEPSEL = 0x1;          // step applies to src 
   descriptors[0].BTCTRL.bit.STEPSIZE = 0x0;         // step size is "X1" 
   descriptors[0].BTCNT.reg = DMAC_WAVE_SIZE;        // how many itemz 
-  descriptors[0].SRCADDR.reg = (uint32_t)(dmac_wave_0 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
+  descriptors[0].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_0 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
   descriptors[0].DSTADDR.reg = (uint32_t)&(DAC->DATA[0].reg) ;            // hwords to dac 
   descriptors[1].BTCTRL.bit.VALID = 0x1;            // descriptor is valid 
   descriptors[1].BTCTRL.bit.EVOSEL = 0x0;           // no events 
@@ -130,7 +134,7 @@ void setup_dmac(void){
   descriptors[1].BTCTRL.bit.STEPSEL = 0x1;          // step applies to src 
   descriptors[1].BTCTRL.bit.STEPSIZE = 0x0;         // step size is "X1" 
   descriptors[1].BTCNT.reg = DMAC_WAVE_SIZE;        // how many itemz 
-  descriptors[1].SRCADDR.reg = (uint32_t)(dmac_wave_0 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
+  descriptors[1].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_0 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
   descriptors[1].DSTADDR.reg = (uint32_t)&(DAC->DATA[0].reg) ;            // hwords to dac 
   // wrap 
   descriptors[0].DESCADDR.reg = (uint32_t)&(descriptors[1]);
@@ -145,7 +149,7 @@ void setup_dmac(void){
   descriptors[2].BTCTRL.bit.STEPSEL = 0x1;          // step applies to src 
   descriptors[2].BTCTRL.bit.STEPSIZE = 0x0;         // step size is "X1" 
   descriptors[2].BTCNT.reg = DMAC_WAVE_SIZE;        // how many itemz 
-  descriptors[2].SRCADDR.reg = (uint32_t)(dmac_wave_1 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
+  descriptors[2].SRCADDR.reg = (uint32_t)(dmac_wave_rev_1 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
   descriptors[2].DSTADDR.reg = (uint32_t)&(DAC->DATA[1].reg) ;            // hwords to dac 
   descriptors[3].BTCTRL.bit.VALID = 0x1;            // descriptor is valid 
   descriptors[3].BTCTRL.bit.EVOSEL = 0x0;           // no events 
@@ -156,7 +160,7 @@ void setup_dmac(void){
   descriptors[3].BTCTRL.bit.STEPSEL = 0x1;          // step applies to src 
   descriptors[3].BTCTRL.bit.STEPSIZE = 0x0;         // step size is "X1" 
   descriptors[3].BTCNT.reg = DMAC_WAVE_SIZE;        // how many itemz 
-  descriptors[3].SRCADDR.reg = (uint32_t)(dmac_wave_1 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
+  descriptors[3].SRCADDR.reg = (uint32_t)(dmac_wave_rev_1 + DMAC_WAVE_SIZE);   // src starts here (pre decriment?)
   descriptors[3].DSTADDR.reg = (uint32_t)&(DAC->DATA[1].reg) ;            // hwords to dac 
   // wrap 
   descriptors[2].DESCADDR.reg = (uint32_t)&(descriptors[3]);
@@ -173,7 +177,26 @@ void setup_timers(void){
   setup_dmac();
 }
 
-void write_periods(uint16_t per_0, uint16_t per_1){
-  TCC0->CCBUF[0].reg = per_0;
-  TCC1->CCBUF[0].reg = per_1;  
+
+void write_periods(int16_t per_0, int16_t per_1){
+  // dir, per... 
+  if(per_0 < 0){
+    descriptors[0].SRCADDR.reg = (uint32_t)(dmac_wave_rev_0 + DMAC_WAVE_SIZE);
+    descriptors[1].SRCADDR.reg = (uint32_t)(dmac_wave_rev_0 + DMAC_WAVE_SIZE);
+    TCC0->CCBUF[0].reg = abs(per_0);
+  } else {
+    descriptors[0].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_0 + DMAC_WAVE_SIZE);
+    descriptors[1].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_0 + DMAC_WAVE_SIZE);
+    TCC0->CCBUF[0].reg = abs(per_0);
+  }
+  // 
+  if(per_1 < 0){
+    descriptors[2].SRCADDR.reg = (uint32_t)(dmac_wave_rev_1 + DMAC_WAVE_SIZE);
+    descriptors[3].SRCADDR.reg = (uint32_t)(dmac_wave_rev_1 + DMAC_WAVE_SIZE);
+    TCC1->CCBUF[0].reg = abs(per_1);
+  } else {
+    descriptors[2].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_1 + DMAC_WAVE_SIZE);
+    descriptors[3].SRCADDR.reg = (uint32_t)(dmac_wave_fwd_1 + DMAC_WAVE_SIZE);
+    TCC1->CCBUF[0].reg = abs(per_1);
+  }
 }
