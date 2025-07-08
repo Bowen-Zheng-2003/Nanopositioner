@@ -47,8 +47,8 @@ void setup_tcc_0(void){
   // nyet, dmac trig 
   // TCC0->EVCTRL.reg = TCC_EVCTRL_OVFEO;
 
-  // setup ... half duty 
-  write_freqs(1 << 8, 1 << 8);
+  // init @ some period 
+  write_periods(255, 255);
 
   // now en-able, 
   TCC0->CTRLA.bit.ENABLE = 1; 
@@ -69,7 +69,7 @@ void setup_dac(void){
 }
 
 // our dmac buffer ... 12 bits,
-#define DMAC_WAVE_SIZE 4096 
+#define DMAC_WAVE_SIZE 4096
 // we want two, and two descriptors, just to avoid witches in the DMAC 
 uint16_t dmac_wave_0[DMAC_WAVE_SIZE];
 uint16_t dmac_wave_1[DMAC_WAVE_SIZE];
@@ -173,7 +173,7 @@ void setup_timers(void){
   setup_dmac();
 }
 
-void write_freqs(uint16_t per_0, uint16_t per_1){
+void write_periods(uint16_t per_0, uint16_t per_1){
   TCC0->CCBUF[0].reg = per_0;
   TCC1->CCBUF[0].reg = per_1;  
 }
