@@ -19,16 +19,13 @@ void loop() {
     phase += 0.5;
     if(phase > TWO_PI) phase = 0.0F;
     // to do 0-1.0F wave 
-    float out = (sin(phase) + 1.0F) / 2.0F;
+    float out_0 = (sin(phase) + 1.0F) / 2.0F;
+    float out_1 = (cos(phase) + 1.0F) / 2.0F;
     // und align...
-    // write_freq(out * FREQ_MAX);
+    // write_freqs(out_0 * FREQ_MAX, out_1 * FREQ_MAX);
     // write_freq((1.0F * FREQ_MAX)); // at slowest
-    write_freq(1);                 // at fastest 
+    // write_freq(1);                 // at fastest 
+    write_freqs(255, 254);
   }
 }
 
-// could do 
-/*
-- TCC0 fires DMAC
-- DMAC writes [0...1024] out of a buffer to the DAC 
-*/
