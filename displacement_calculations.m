@@ -1,12 +1,12 @@
 % Parameters (from Table 1)
-l2 = 12;    % mm
-l3 = 6;     % mm
-R = 0.6;    % mm
-e = 6;      % mm
-m = 1.9;    % mm
-E = 196.6e3;% MPa (converted from GPa)
-G = 78.6e3; % MPa (converted from GPa)
-d1 = 10;    % microns
+l2 = 7;    % mm
+l3 = 3;     % mm
+R = 0.5;    % mm
+e = 6.35;      % mm
+m = 2;    % mm
+E = 205e3;% MPa (converted from GPa)
+G = 80e3; % MPa (converted from GPa)
+d1 = 9.1;    % microns
 
 F = 4;      % Arbitrary force (will cancel out)
 
@@ -38,8 +38,5 @@ d2 = d1 * Ra;
 
 % Display result
 fprintf('Amplification Ratio Ra = %.3f\n', Ra);
-fprintf('Output Displacement d2 = %.3f\n', d2);
-
-% Source: 
-% https://www.sciencedirect.com/science/article/abs/pii/S0888327020302673?via%3Dihub
+fprintf('Output Displacement d2 = %.3f microns\n', d2);
 
